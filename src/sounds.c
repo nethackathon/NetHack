@@ -590,6 +590,9 @@ domonnoise(register struct monst* mtmp)
     /* silliness, with slight chance to interfere with shopping */
     else if (Hallucination && mon_is_gecko(mtmp))
         msound = MS_SELL;
+        
+    if (ptr == &mons[PM_VLAD_THE_IMPALER])
+        msound = MS_BUNNICULA;
 
     /* be sure to do this before talking; the monster might teleport away, in
      * which case we want to check its pre-teleport position
@@ -598,6 +601,9 @@ domonnoise(register struct monst* mtmp)
         map_invisible(mtmp->mx, mtmp->my);
 
     switch (msound) {
+    case MS_BUNNICULA:
+        verbl_msg = "I only drink... carrot juice.";
+        break;
     case MS_ORACLE:
         return doconsult(mtmp); /* check this */
     case MS_PRIEST:

@@ -266,9 +266,9 @@
    horses can be tamed by always-veggy food or lichen corpses but
    not tamed or pacified by other corpses or tins of veggy critters */
 #define befriend_with_obj(ptr, obj) \
-    (((ptr) == &mons[PM_MONKEY] || (ptr) == &mons[PM_APE])               \
-     ? (obj)->otyp == BANANA                                             \
-     : (is_domestic(ptr) && (obj)->oclass == FOOD_CLASS                  \
+    ((( (ptr) == &mons[PM_MONKEY] || (ptr) == &mons[PM_APE] ) && (obj)->otyp == BANANA ) \
+     || ((ptr) == &mons[PM_VLAD_THE_IMPALER] && (obj)->otyp == CARROT) \
+     || (is_domestic(ptr) && (obj)->oclass == FOOD_CLASS                  \
         && ((ptr)->mlet != S_UNICORN                                     \
             || objects[(obj)->otyp].oc_material == VEGGY                 \
             || ((obj)->otyp == CORPSE && (obj)->corpsenm == PM_LICHEN))))

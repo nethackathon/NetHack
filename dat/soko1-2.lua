@@ -100,8 +100,13 @@ des.region({ region={18,09, 22,15}, lit = 1, type = "zoo", filled = 1, irregular
 
 local pt = selection.rndcoord(place);
 if percent(25) then
-   des.object({ id="bag of holding", coord=pt,
-		buc="not-cursed", achievement=1 });
+   if percent(90) then
+       des.object({ id="bag of holding", coord=pt,
+            buc="not-cursed", achievement=1 });
+   else
+       des.object({ id="Faberge egg", coord=pt,
+            buc="not-cursed", achievement=1 });
+   end
 else
    des.object({ id="amulet of reflection", coord=pt,
 		buc="not-cursed", achievement=1 });

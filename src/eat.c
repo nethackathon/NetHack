@@ -87,7 +87,7 @@ is_edible(register struct obj *obj)
     if (u.umonnum == PM_GHOUL)
         return (boolean)((obj->otyp == CORPSE
                           && !vegan(&mons[obj->corpsenm]))
-                         || (obj->otyp == EGG));
+                         || (is_egg(obj)));
 
     if (u.umonnum == PM_GELATINOUS_CUBE && is_organic(obj)
         /* [g-cubes can eat containers and retain all contents
@@ -2030,7 +2030,7 @@ fprefx(struct obj *otmp)
                             : "Yo' mama");
             }
 #endif
-        } else if (otmp->otyp == EGG && stale_egg(otmp)) {
+        } else if (is_egg(otmp) && stale_egg(otmp)) {
             pline("Ugh.  Rotten egg."); /* perhaps others like it */
             /* increasing existing nausea means that it will take longer
                before eventual vomit, but also means that constitution
@@ -2865,7 +2865,7 @@ doeat(void)
                                an(food_xname(otmp, FALSE)));
                 ll_conduct++;
             }
-            if (otmp->otyp != EGG) {
+            if (!is_egg(otmp)) {
                 if (!u.uconduct.unvegetarian && !ll_conduct)
                     livelog_printf(LL_CONDUCT,
                                    "tasted meat for first time, by eating %s",
@@ -2876,7 +2876,7 @@ doeat(void)
             break;
         default:
             if (otmp->otyp == PANCAKE || otmp->otyp == FORTUNE_COOKIE /*eggs*/
-                || otmp->otyp == CREAM_PIE || otmp->otyp == CANDY_BAR /*milk*/
+                || otmp->otyp == CREAM_PIE || otmp->otyp == CANDY_BAR || otmp->otyp == CHOCOLATE_EGG /*milk/milk chocolate*/
                 || otmp->otyp == LUMP_OF_ROYAL_JELLY)
                 if (!u.uconduct.unvegan++ && !ll_conduct)
                     livelog_printf(LL_CONDUCT,
@@ -2886,7 +2886,7 @@ doeat(void)
         }
 
         g.context.victual.reqtime = objects[otmp->otyp].oc_delay;
-        if (otmp->otyp != FORTUNE_COOKIE
+        if (otmp->otyp != FORTUNE_COOKIE && otmp->otyp != CHOCOLATE_EGG
             && (otmp->cursed || (!nonrotting_food(otmp->otyp)
                                  && (g.moves - otmp->age)
                                         > (otmp->blessed ? 50L : 30L)
@@ -3612,9 +3612,9 @@ consume_oeaten(struct obj *obj, int amt)
         char itembuf[40];
         int otyp = obj->otyp;
 
-        if (otyp == CORPSE || otyp == EGG || otyp == TIN) {
+        if (otyp == CORPSE || is_egg(obj) || otyp == TIN) {
             Strcpy(itembuf, (otyp == CORPSE) ? "corpse"
-                            : (otyp == EGG) ? "egg"
+                            : (is_egg(obj)) ? "egg"
                               : (otyp == TIN) ? "tin" : "other?");
             Sprintf(eos(itembuf), " [%d]", obj->corpsenm);
         } else {

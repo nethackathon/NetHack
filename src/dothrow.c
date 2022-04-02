@@ -1126,6 +1126,7 @@ harmless_missile(struct obj *obj)
     case KELP_FROND:
     case SPRIG_OF_WOLFSBANE:
     case FORTUNE_COOKIE:
+    case CHOCOLATE_EGG:
     case PANCAKE:
         return TRUE;
     case RUBBER_HOSE:
@@ -2228,6 +2229,21 @@ release_camera_demon(struct obj *obj, xchar x, xchar y)
     }
 }
 
+/* Scatter contents of Faberge egg around.
+   Copied from boh explosion routine.
+ */
+static void
+do_faberge_explosion(struct obj *boh)
+{
+    struct obj *otmp, *nobj;
+
+    for (otmp = boh->cobj; otmp; otmp = nobj) {
+        nobj = otmp->nobj;
+        otmp->ox = u.ux, otmp->oy = u.uy;
+        (void) scatter(u.ux, u.uy, 4, MAY_HIT | MAY_DESTROY, otmp);
+    }
+}
+
 /*
  * Unconditionally break an object. Assumes all resistance checks
  * and break messages have been delivered prior to getting here.
@@ -2242,6 +2258,9 @@ breakobj(
     boolean fracture = FALSE;
 
     switch (obj->oclass == POTION_CLASS ? POT_WATER : obj->otyp) {
+    case FABERGE_EGG:
+        do_faberge_explosion(obj);
+        break;
     case MIRROR:
         if (hero_caused)
             change_luck(-2);
@@ -2331,6 +2350,7 @@ breaktest(struct obj *obj)
     if (objects[obj->otyp].oc_material == GLASS && !obj->oartifact
         && obj->oclass != GEM_CLASS)
         return 1;
+    if (is_egg(obj)) return 1;
     switch (obj->oclass == POTION_CLASS ? POT_WATER : obj->otyp) {
     case EXPENSIVE_CAMERA:
     case POT_WATER: /* really, all potions */
@@ -2348,18 +2368,23 @@ breaktest(struct obj *obj)
 static void
 breakmsg(struct obj *obj, boolean in_view)
 {
+    if (is_egg(obj)) {
+      pline("Splat!");
+      return;
+    }
     const char *to_pieces;
 
     to_pieces = "";
     switch (obj->oclass == POTION_CLASS ? POT_WATER : obj->otyp) {
     default: /* glass or crystal wand */
-        if (obj->oclass != WAND_CLASS)
+        if (obj->oclass != WAND_CLASS && obj->otyp != FABERGE_EGG)
             impossible("breaking odd object?");
         /*FALLTHRU*/
     case CRYSTAL_PLATE_MAIL:
     case LENSES:
     case MIRROR:
     case CRYSTAL_BALL:
+    case FABERGE_EGG:
     case EXPENSIVE_CAMERA:
         to_pieces = " into a thousand pieces";
     /*FALLTHRU*/

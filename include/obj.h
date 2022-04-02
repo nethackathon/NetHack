@@ -284,6 +284,13 @@ struct obj {
 #define Is_pudding(o) \
     (o->otyp == GLOB_OF_GRAY_OOZE || o->otyp == GLOB_OF_BROWN_PUDDING   \
      || o->otyp == GLOB_OF_GREEN_SLIME || o->otyp == GLOB_OF_BLACK_PUDDING)
+#define is_egg(o) \
+    (o->otyp == BLACK_EGG || o->otyp == BLUE_EGG   \
+     || o->otyp == B_BLUE_EGG || o->otyp == RED_EGG \
+     || o->otyp == PINK_EGG || o->otyp == ORANGE_EGG || o->otyp == B_PINK_EGG \
+     || o->otyp == GREEN_EGG || o->otyp == BLUE_GREEN_EGG || o->otyp == B_GREEN_EGG \
+     || o->otyp == B_BLUE_GREEN_EGG || o->otyp == BROWN_EGG || o->otyp == GRAY_EGG \
+     || o->otyp == YELLOW_EGG || o->otyp == EGG)
 
 /* Containers */
 #define carried(o) ((o)->where == OBJ_INVENT)
@@ -293,12 +300,12 @@ struct obj {
      (o)->cobj != (struct obj *) 0)
 #define Is_container(o) ((o)->otyp >= LARGE_BOX && (o)->otyp <= BAG_OF_TRICKS)
 #define Is_box(o) ((o)->otyp == LARGE_BOX || (o)->otyp == CHEST)
-#define Is_mbag(o) ((o)->otyp == BAG_OF_HOLDING || (o)->otyp == BAG_OF_TRICKS)
+#define Is_mbag(o) ((o)->otyp == BAG_OF_HOLDING || (o)->otyp == BAG_OF_TRICKS || (o)->otyp == FABERGE_EGG)
 #define SchroedingersBox(o) ((o)->otyp == LARGE_BOX && (o)->spe == 1)
 /* usually waterproof; random chance to be subjected to leakage if cursed;
    excludes statues, which aren't vulernable to water even when cursed */
 #define Waterproof_container(o) \
-    ((o)->otyp == OILSKIN_SACK || (o)->otyp == ICE_BOX || Is_box(o))
+    ((o)->otyp == OILSKIN_SACK || (o)->otyp == ICE_BOX || (o)->otyp == FABERGE_EGG || Is_box(o))
 
 /* dragon gear */
 #define Is_dragon_scales(obj) \

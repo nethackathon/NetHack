@@ -26,7 +26,7 @@ shuffle(niches);
 
 des.ladder("down", 11,05)
 -- The lord and his court
-des.monster("Vlad the Impaler", 06, 05)
+des.monster("Bunnicula", 06, 05)
 des.monster("V",niches[1])
 des.monster("V",niches[2])
 des.monster("V",niches[3])
@@ -42,7 +42,12 @@ des.door("locked",08,07)
 des.door("locked",10,07)
 des.door("closed",03,06)
 -- treasures
-des.object("chest", 07,05)
+-- des.object("chest", 07,05)
+des.object({ id = "chest", x=07, y=05,
+             contents = function()
+                des.object({ id = "golden egg", quantity=1 })
+             end
+});
 
 des.object("chest",niches[6])
 des.object("chest",niches[1])

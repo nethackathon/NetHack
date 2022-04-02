@@ -796,7 +796,7 @@ dogfood(struct monst *mon, struct obj *obj)
                            : (starving && !vegan(fptr))
                               ? ACCFOOD
                               : POISON;
-            if (obj->otyp == EGG)
+            if (is_egg(obj))
                 return stale_egg(obj) ? CADAVER : starving ? ACCFOOD : POISON;
             return TABU;
         }
@@ -851,7 +851,7 @@ dogfood(struct monst *mon, struct obj *obj)
         case APPLE:
             return herbi ? DOGFOOD : starving ? ACCFOOD : MANFOOD;
         case CARROT:
-            return (herbi || mblind) ? DOGFOOD : starving ? ACCFOOD : MANFOOD;
+            return (herbi || mblind || mptr == &mons[PM_VLAD_THE_IMPALER]) ? DOGFOOD : starving ? ACCFOOD : MANFOOD;
         case BANANA:
             return (mptr->mlet == S_YETI && herbi)
                       ? DOGFOOD /* for monkey and ape (tameable), sasquatch */

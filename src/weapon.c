@@ -99,7 +99,7 @@ weapon_descr(struct obj *obj)
            corpses, tins, eggs, and globs avoid "food",
            statues and boulders avoid "large rock",
            and towels and tin openers avoid "tool" */
-        descr = (obj->otyp == CORPSE || obj->otyp == TIN || obj->otyp == EGG
+        descr = (obj->otyp == CORPSE || obj->otyp == TIN || is_egg(obj)
                  || obj->otyp == STATUE || obj->otyp == BOULDER
                  || obj->otyp == TOWEL || obj->otyp == TIN_OPENER)
                 ? OBJ_NAME(objects[obj->otyp])
