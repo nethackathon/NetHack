@@ -56,7 +56,7 @@ extern char *tilename(int, int);
 /* The numbers in the following calculation are the
    count of tiles present in:
    monsters.txt objects.txt other.txt monsters.txt */
-#define MAGICTILENO (788 + 459 + 237 + 788)
+#define MAGICTILENO (788 + 477 + 237 + 788)
 
 #if BITCOUNT == 4
 #define MAX_X 320 /* 2 per byte, 4 bits per pixel */
