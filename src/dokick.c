@@ -411,7 +411,7 @@ container_impact_dmg(struct obj *obj, xchar x,
         if (objects[otmp->otyp].oc_material == GLASS
             && otmp->oclass != GEM_CLASS && !obj_resists(otmp, 33, 100)) {
             result = "shatter";
-        } else if (is_egg(otmp) && !rn2(3)) {
+        } else if (is_egg(otmp->otyp) && !rn2(3)) {
             result = "cracking";
         }
         if (result) {

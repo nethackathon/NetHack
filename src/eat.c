@@ -87,7 +87,7 @@ is_edible(register struct obj *obj)
     if (u.umonnum == PM_GHOUL)
         return (boolean)((obj->otyp == CORPSE
                           && !vegan(&mons[obj->corpsenm]))
-                         || (is_egg(obj)));
+                         || (is_egg(obj->otyp)));
 
     if (u.umonnum == PM_GELATINOUS_CUBE && is_organic(obj)
         /* [g-cubes can eat containers and retain all contents
@@ -2030,7 +2030,7 @@ fprefx(struct obj *otmp)
                             : "Yo' mama");
             }
 #endif
-        } else if (is_egg(otmp) && stale_egg(otmp)) {
+        } else if (is_egg(otmp->otyp) && stale_egg(otmp)) {
             pline("Ugh.  Rotten egg."); /* perhaps others like it */
             /* increasing existing nausea means that it will take longer
                before eventual vomit, but also means that constitution
@@ -2865,7 +2865,7 @@ doeat(void)
                                an(food_xname(otmp, FALSE)));
                 ll_conduct++;
             }
-            if (!is_egg(otmp)) {
+            if (!is_egg(otmp->otyp)) {
                 if (!u.uconduct.unvegetarian && !ll_conduct)
                     livelog_printf(LL_CONDUCT,
                                    "tasted meat for first time, by eating %s",
@@ -3612,9 +3612,9 @@ consume_oeaten(struct obj *obj, int amt)
         char itembuf[40];
         int otyp = obj->otyp;
 
-        if (otyp == CORPSE || is_egg(obj) || otyp == TIN) {
+        if (otyp == CORPSE || is_egg(otyp) || otyp == TIN) {
             Strcpy(itembuf, (otyp == CORPSE) ? "corpse"
-                            : (is_egg(obj)) ? "egg"
+                            : (is_egg(otyp)) ? "egg"
                               : (otyp == TIN) ? "tin" : "other?");
             Sprintf(eos(itembuf), " [%d]", obj->corpsenm);
         } else {

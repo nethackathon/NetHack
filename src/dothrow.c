@@ -2350,7 +2350,7 @@ breaktest(struct obj *obj)
     if (objects[obj->otyp].oc_material == GLASS && !obj->oartifact
         && obj->oclass != GEM_CLASS)
         return 1;
-    if (is_egg(obj)) return 1;
+    if (is_egg(obj->otyp)) return 1;
     switch (obj->oclass == POTION_CLASS ? POT_WATER : obj->otyp) {
     case EXPENSIVE_CAMERA:
     case POT_WATER: /* really, all potions */
@@ -2368,7 +2368,7 @@ breaktest(struct obj *obj)
 static void
 breakmsg(struct obj *obj, boolean in_view)
 {
-    if (is_egg(obj)) {
+    if (is_egg(obj->otyp)) {
       pline("Splat!");
       return;
     }

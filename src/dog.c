@@ -796,7 +796,7 @@ dogfood(struct monst *mon, struct obj *obj)
                            : (starving && !vegan(fptr))
                               ? ACCFOOD
                               : POISON;
-            if (is_egg(obj))
+            if (is_egg(obj->otyp))
                 return stale_egg(obj) ? CADAVER : starving ? ACCFOOD : POISON;
             return TABU;
         }

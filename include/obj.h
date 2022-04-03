@@ -284,13 +284,13 @@ struct obj {
 #define Is_pudding(o) \
     (o->otyp == GLOB_OF_GRAY_OOZE || o->otyp == GLOB_OF_BROWN_PUDDING   \
      || o->otyp == GLOB_OF_GREEN_SLIME || o->otyp == GLOB_OF_BLACK_PUDDING)
-#define is_egg(o) \
-    (o->otyp == BLACK_EGG || o->otyp == BLUE_EGG   \
-     || o->otyp == B_BLUE_EGG || o->otyp == RED_EGG \
-     || o->otyp == PINK_EGG || o->otyp == ORANGE_EGG || o->otyp == B_PINK_EGG \
-     || o->otyp == GREEN_EGG || o->otyp == BLUE_GREEN_EGG || o->otyp == B_GREEN_EGG \
-     || o->otyp == B_BLUE_GREEN_EGG || o->otyp == BROWN_EGG || o->otyp == GRAY_EGG \
-     || o->otyp == YELLOW_EGG || o->otyp == EGG)
+#define is_egg(otyp) \
+    (otyp == BLACK_EGG || otyp == BLUE_EGG   \
+     || otyp == B_BLUE_EGG || otyp == RED_EGG \
+     || otyp == PINK_EGG || otyp == ORANGE_EGG || otyp == B_PINK_EGG \
+     || otyp == GREEN_EGG || otyp == BLUE_GREEN_EGG || otyp == B_GREEN_EGG \
+     || otyp == B_BLUE_GREEN_EGG || otyp == BROWN_EGG || otyp == GRAY_EGG \
+     || otyp == YELLOW_EGG || otyp == EGG)
 
 /* Containers */
 #define carried(o) ((o)->where == OBJ_INVENT)

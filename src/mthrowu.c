@@ -165,7 +165,7 @@ drop_throw(
     struct trap *t;
 
     if (obj->otyp == CREAM_PIE || obj->oclass == VENOM_CLASS
-        || (ohit && is_egg(obj)))
+        || (ohit && is_egg(obj->otyp)))
         create = 0;
     else if (ohit && (is_multigen(obj) || obj->otyp == ROCK))
         create = !rn2(3);
@@ -378,7 +378,7 @@ ohitmon(
             seemimic(mtmp);
         mtmp->msleeping = 0;
         if (vis) {
-            if (is_egg(otmp)) {
+            if (is_egg(otmp->otyp)) {
                 pline("Splat!  %s is hit with %s egg!", Monnam(mtmp),
                       otmp->known ? an(mons[otmp->corpsenm].pmnames[NEUTRAL])
                                   : "an");
@@ -393,7 +393,7 @@ ohitmon(
                 hit(distant_name(otmp, mshot_xname), mtmp, how);
             }
         } else if (verbose && !g.mtarget)
-            pline("%s%s is hit%s", (is_egg(otmp)) ? "Splat!  " : "",
+            pline("%s%s is hit%s", (is_egg(otmp->otyp)) ? "Splat!  " : "",
                   Monnam(mtmp), exclam(damage));
 
         if (otmp->opoisoned && is_poisonable(otmp)) {
