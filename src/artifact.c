@@ -433,7 +433,7 @@ boolean
 confers_luck(struct obj *obj)
 {
     /* might as well check for this too */
-    if (obj->otyp == LUCKSTONE)
+    if (obj->otyp == LUCKSTONE || obj->otyp == GOLDEN_EGG)
         return TRUE;
 
     return (boolean) (obj->oartifact && spec_ability(obj, SPFX_LUCK));

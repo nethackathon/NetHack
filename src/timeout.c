@@ -551,7 +551,7 @@ nh_timeout(void)
          * Luck is based at 0 usually, +1 if a full moon and -1 on Friday 13th
          */
         register int time_luck = stone_luck(FALSE);
-        boolean nostone = !carrying(LUCKSTONE) && !stone_luck(TRUE);
+        boolean nostone = !carrying(LUCKSTONE) && !carrying(GOLDEN_EGG) && !stone_luck(TRUE);
 
         if (u.uluck > baseluck && (nostone || time_luck < 0))
             u.uluck--;

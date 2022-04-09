@@ -379,7 +379,7 @@ set_moreluck(void)
 {
     int luckbon = stone_luck(TRUE);
 
-    if (!luckbon && !carrying(LUCKSTONE))
+    if (!luckbon && !carrying(LUCKSTONE) && !carrying(GOLDEN_EGG))
         u.moreluck = 0;
     else if (luckbon >= 0)
         u.moreluck = LUCKADD;

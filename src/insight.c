@@ -1801,7 +1801,7 @@ attributes_enlightenment(int unused_mode UNUSED, int final)
         you_have("extra luck", "");
     else if (u.moreluck < 0)
         you_have("reduced luck", "");
-    if (carrying(LUCKSTONE) || stone_luck(TRUE)) {
+    if (carrying(LUCKSTONE) || carrying(GOLDEN_EGG) || stone_luck(TRUE)) {
         ltmp = stone_luck(FALSE);
         if (ltmp <= 0)
             enl_msg("Bad luck ", "does", "did", " not time out for you", "");
