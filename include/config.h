@@ -604,7 +604,7 @@ typedef unsigned char uchar;
 #define CHRONICLE
 #ifdef CHRONICLE
 /* LIVELOG - log CHRONICLE events into LIVELOGFILE as they happen. */
-/* #define LIVELOG */
+#define LIVELOG
 #ifdef LIVELOG
 #define LIVELOGFILE "livelog" /* in-game events recorded, live */
 #endif /* LIVELOG */
