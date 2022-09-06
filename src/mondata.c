@@ -306,22 +306,11 @@ can_blnd(
 boolean
 ranged_attk(struct permonst* ptr)
 {
-    register int i, atyp;
-    long atk_mask = (1L << AT_BREA) | (1L << AT_SPIT) | (1L << AT_GAZE);
+    int i;
 
-    /* was: (attacktype(ptr, AT_BREA) || attacktype(ptr, AT_WEAP)
-     *       || attacktype(ptr, AT_SPIT) || attacktype(ptr, AT_GAZE)
-     *       || attacktype(ptr, AT_MAGC));
-     * but that's too slow -dlc
-     */
-    for (i = 0; i < NATTK; i++) {
-        atyp = ptr->mattk[i].aatyp;
-        if (atyp >= AT_WEAP)
+    for (i = 0; i < NATTK; i++)
+        if (DISTANCE_ATTK_TYPE(ptr->mattk[i].aatyp))
             return TRUE;
-        /* assert(atyp < 32); */
-        if ((atk_mask & (1L << atyp)) != 0L)
-            return TRUE;
-    }
     return FALSE;
 }
 
@@ -435,7 +424,7 @@ can_be_strangled(struct monst* mon)
 boolean
 can_track(register struct permonst* ptr)
 {
-    if (uwep && uwep->oartifact == ART_EXCALIBUR)
+    if (u_wield_art(ART_EXCALIBUR))
         return TRUE;
     else
         return (boolean) haseyes(ptr);
@@ -467,7 +456,8 @@ breakarm(register struct permonst* ptr)
 boolean
 sticks(register struct permonst* ptr)
 {
-    return (boolean) (dmgtype(ptr, AD_STCK) || dmgtype(ptr, AD_WRAP)
+    return (boolean) (dmgtype(ptr, AD_STCK)
+                      || (dmgtype(ptr, AD_WRAP) && !attacktype(ptr, AT_ENGL))
                       || attacktype(ptr, AT_HUGS));
 }
 
@@ -1359,7 +1349,7 @@ monstseesu(unsigned long seenres)
 {
     struct monst *mtmp;
 
-    if (seenres == M_SEEN_NOTHING)
+    if (seenres == M_SEEN_NOTHING || u.uswallow)
         return;
 
     for (mtmp = fmon; mtmp; mtmp = mtmp->nmon)
@@ -1380,6 +1370,62 @@ resist_conflict(struct monst* mtmp)
     int resist_chance = min(19, (ACURR(A_CHA) - mtmp->m_lev + u.ulevel));
 
     return (rnd(20) > resist_chance);
+}
+
+/* does monster mtmp know traps of type ttyp */
+boolean
+mon_knows_traps(struct monst *mtmp, int ttyp)
+{
+    if (ttyp == ALL_TRAPS)
+        return (boolean)(mtmp->mtrapseen);
+    else if (ttyp == NO_TRAP)
+        return !(boolean)(mtmp->mtrapseen);
+    else
+        return ((mtmp->mtrapseen & (1L << (ttyp - 1))) != 0);
+}
+
+/* monster mtmp learns all traps of type ttyp */
+void
+mon_learns_traps(struct monst *mtmp, int ttyp)
+{
+    if (ttyp == ALL_TRAPS)
+        mtmp->mtrapseen = ~0L;
+    else if (ttyp == NO_TRAP)
+        mtmp->mtrapseen = 0L;
+    else
+        mtmp->mtrapseen |= (1L << (ttyp - 1));
+}
+
+/* monsters see a trap trigger, and remember it */
+void
+mons_see_trap(struct trap *ttmp)
+{
+    struct monst *mtmp;
+    coordxy tx = ttmp->tx, ty = ttmp->ty;
+    int maxdist = levl[tx][ty].lit ? 7*7 : 2;
+
+    for (mtmp = fmon; mtmp; mtmp = mtmp->nmon) {
+        if (is_animal(mtmp->data) || mindless(mtmp->data)
+            || !haseyes(mtmp->data) || !mtmp->mcansee)
+            continue;
+        if (dist2(mtmp->mx, mtmp->my, tx, ty) > maxdist)
+            continue;
+        if (!m_cansee(mtmp, tx, ty))
+            continue;
+        mon_learns_traps(mtmp, ttmp->ttyp);
+    }
+}
+
+int
+get_atkdam_type(int adtyp)
+{
+    if (adtyp == AD_RBRE) {
+        static const int rnd_breath_typ[] = {
+            AD_MAGM, AD_FIRE, AD_COLD, AD_SLEE,
+            AD_DISN, AD_ELEC, AD_DRST, AD_ACID };
+        return rnd_breath_typ[rn2(SIZE(rnd_breath_typ))];
+    }
+    return adtyp;
 }
 
 /*mondata.c*/

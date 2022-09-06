@@ -4,6 +4,11 @@
 
 #include "hack.h"
 
+static boolean throne_mon_sound(struct monst *);
+static boolean beehive_mon_sound(struct monst *);
+static boolean morgue_mon_sound(struct monst *);
+static boolean zoo_mon_sound(struct monst *);
+static boolean temple_priest_sound(struct monst *);
 static boolean mon_is_gecko(struct monst *);
 static int domonnoise(struct monst *);
 static int dochat(void);
@@ -20,7 +25,170 @@ mon_in_room(struct monst* mon, int rmtyp)
     return FALSE;
 }
 
-DISABLE_WARNING_FORMAT_NONLITERAL
+
+static boolean
+throne_mon_sound(struct monst *mtmp)
+{
+    if ((mtmp->msleeping || is_lord(mtmp->data)
+         || is_prince(mtmp->data)) && !is_animal(mtmp->data)
+        && mon_in_room(mtmp, COURT)) {
+        static const char *const throne_msg[4] = {
+            "the tones of courtly conversation.",
+            "a sceptre pounded in judgment.",
+            "Someone shouts \"Off with %s head!\"",
+            "Queen Beruthiel's cats!",
+        };
+        int which = rn2(3) + (Hallucination ? 1 : 0);
+
+        if (which != 2)
+            You_hear1(throne_msg[which]);
+        else {
+            DISABLE_WARNING_FORMAT_NONLITERAL
+            pline(throne_msg[2], uhis());
+            RESTORE_WARNING_FORMAT_NONLITERAL
+        }
+        return TRUE;
+    }
+    return FALSE;
+}
+
+
+static boolean
+beehive_mon_sound(struct monst *mtmp)
+{
+    if ((mtmp->data->mlet == S_ANT && is_flyer(mtmp->data))
+        && mon_in_room(mtmp, BEEHIVE)) {
+        int hallu = Hallucination ? 1 : 0;
+
+        switch (rn2(2) + hallu) {
+        case 0:
+            You_hear("a low buzzing.");
+            break;
+        case 1:
+            You_hear("an angry drone.");
+            break;
+        case 2:
+            You_hear("bees in your %sbonnet!",
+                     uarmh ? "" : "(nonexistent) ");
+            break;
+        }
+        return TRUE;
+    }
+    return FALSE;
+}
+
+static boolean
+morgue_mon_sound(struct monst *mtmp)
+{
+    if ((is_undead(mtmp->data) || is_vampshifter(mtmp))
+        && mon_in_room(mtmp, MORGUE)) {
+        int hallu = Hallucination ? 1 : 0;
+        const char *hair = body_part(HAIR); /* hair/fur/scales */
+
+        switch (rn2(2) + hallu) {
+        case 0:
+            You("suddenly realize it is unnaturally quiet.");
+            break;
+        case 1:
+            pline_The("%s on the back of your %s %s up.", hair,
+                      body_part(NECK), vtense(hair, "stand"));
+            break;
+        case 2:
+            pline_The("%s on your %s %s to stand up.", hair,
+                      body_part(HEAD), vtense(hair, "seem"));
+            break;
+        }
+        return TRUE;
+    }
+    return FALSE;
+}
+
+static boolean
+zoo_mon_sound(struct monst *mtmp)
+{
+    if ((mtmp->msleeping || is_animal(mtmp->data))
+        && mon_in_room(mtmp, ZOO)) {
+        int hallu = Hallucination ? 1 : 0;
+        static const char *const zoo_msg[3] = {
+            "a sound reminiscent of an elephant stepping on a peanut.",
+            "a sound reminiscent of a seal barking.", "Doctor Dolittle!",
+        };
+        You_hear1(zoo_msg[rn2(2) + hallu]);
+        return TRUE;
+    }
+    return FALSE;
+}
+
+static boolean
+temple_priest_sound(struct monst *mtmp)
+{
+    if (mtmp->ispriest && inhistemple(mtmp)
+        /* priest must be active */
+        && !helpless(mtmp)
+        /* hero must be outside this temple */
+        && temple_occupied(u.urooms) != EPRI(mtmp)->shroom) {
+        /* Generic temple messages; no attempt to match topic or tone
+           to the pantheon involved, let alone to the specific deity.
+           These are assumed to be coming from the attending priest;
+           asterisk means that the priest must be capable of speech;
+           pound sign (octathorpe,&c--don't go there) means that the
+           priest and the altar must not be directly visible (we don't
+           care if telepathy or extended detection reveals that the
+           priest is not currently standing on the altar; he's mobile). */
+        static const char *const temple_msg[] = {
+            "*someone praising %s.", "*someone beseeching %s.",
+            "#an animal carcass being offered in sacrifice.",
+            "*a strident plea for donations.",
+        };
+        const char *msg;
+        int hallu = Hallucination ? 1 : 0;
+        int trycount = 0,
+            ax = EPRI(mtmp)->shrpos.x,
+            ay = EPRI(mtmp)->shrpos.y;
+        boolean speechless = (mtmp->data->msound <= MS_ANIMAL),
+            in_sight = canseemon(mtmp) || cansee(ax, ay);
+
+        do {
+            msg = temple_msg[rn2(SIZE(temple_msg) - 1 + hallu)];
+            if (index(msg, '*') && speechless)
+                continue;
+            if (index(msg, '#') && in_sight)
+                continue;
+            break; /* msg is acceptable */
+        } while (++trycount < 50);
+        while (!letter(*msg))
+            ++msg; /* skip control flags */
+        if (index(msg, '%')) {
+            DISABLE_WARNING_FORMAT_NONLITERAL
+            You_hear(msg, halu_gname(EPRI(mtmp)->shralign));
+            RESTORE_WARNING_FORMAT_NONLITERAL
+        } else
+            You_hear1(msg);
+        return TRUE;
+    }
+    return FALSE;
+}
+
+static boolean
+oracle_sound(struct monst *mtmp)
+{
+    if (mtmp->data != &mons[PM_ORACLE])
+        return FALSE;
+
+    /* and don't produce silly effects when she's clearly visible */
+    if (Hallucination || !canseemon(mtmp)) {
+        int hallu = Hallucination ? 1 : 0;
+        static const char *const ora_msg[5] = {
+            "a strange wind.",     /* Jupiter at Dodona */
+            "convulsive ravings.", /* Apollo at Delphi */
+            "snoring snakes.",     /* AEsculapius at Epidaurus */
+            "someone say \"No more woodchucks!\"",
+            "a loud ZOT!" /* both rec.humor.oracle */
+        };
+        You_hear1(ora_msg[rn2(3) + hallu * 2]);
+    }
+    return TRUE;
+}
 
 void
 dosounds(void)
@@ -48,27 +216,8 @@ dosounds(void)
         You_hear1(sink_msg[rn2(2) + hallu]);
     }
     if (g.level.flags.has_court && !rn2(200)) {
-        static const char *const throne_msg[4] = {
-            "the tones of courtly conversation.",
-            "a sceptre pounded in judgment.",
-            "Someone shouts \"Off with %s head!\"", "Queen Beruthiel's cats!",
-        };
-        for (mtmp = fmon; mtmp; mtmp = mtmp->nmon) {
-            if (DEADMONSTER(mtmp))
-                continue;
-            if ((mtmp->msleeping || is_lord(mtmp->data)
-                 || is_prince(mtmp->data)) && !is_animal(mtmp->data)
-                && mon_in_room(mtmp, COURT)) {
-                /* finding one is enough, at least for now */
-                int which = rn2(3) + hallu;
-
-                if (which != 2)
-                    You_hear1(throne_msg[which]);
-                else
-                    pline(throne_msg[2], uhis());
-                return;
-            }
-        }
+        if (get_iter_mons(throne_mon_sound))
+            return;
     }
     if (g.level.flags.has_swamp && !rn2(200)) {
         static const char *const swamp_msg[3] = {
@@ -115,51 +264,12 @@ dosounds(void)
         return;
     }
     if (g.level.flags.has_beehive && !rn2(200)) {
-        for (mtmp = fmon; mtmp; mtmp = mtmp->nmon) {
-            if (DEADMONSTER(mtmp))
-                continue;
-            if ((mtmp->data->mlet == S_ANT && is_flyer(mtmp->data))
-                && mon_in_room(mtmp, BEEHIVE)) {
-                switch (rn2(2) + hallu) {
-                case 0:
-                    You_hear("a low buzzing.");
-                    break;
-                case 1:
-                    You_hear("an angry drone.");
-                    break;
-                case 2:
-                    You_hear("bees in your %sbonnet!",
-                             uarmh ? "" : "(nonexistent) ");
-                    break;
-                }
-                return;
-            }
-        }
+        if (get_iter_mons(beehive_mon_sound))
+            return;
     }
     if (g.level.flags.has_morgue && !rn2(200)) {
-        for (mtmp = fmon; mtmp; mtmp = mtmp->nmon) {
-            if (DEADMONSTER(mtmp))
-                continue;
-            if ((is_undead(mtmp->data) || is_vampshifter(mtmp))
-                && mon_in_room(mtmp, MORGUE)) {
-                const char *hair = body_part(HAIR); /* hair/fur/scales */
-
-                switch (rn2(2) + hallu) {
-                case 0:
-                    You("suddenly realize it is unnaturally quiet.");
-                    break;
-                case 1:
-                    pline_The("%s on the back of your %s %s up.", hair,
-                              body_part(NECK), vtense(hair, "stand"));
-                    break;
-                case 2:
-                    pline_The("%s on your %s %s to stand up.", hair,
-                              body_part(HEAD), vtense(hair, "seem"));
-                    break;
-                }
-                return;
-            }
-        }
+        if (get_iter_mons(morgue_mon_sound))
+            return;
     }
     if (g.level.flags.has_barracks && !rn2(200)) {
         static const char *const barracks_msg[4] = {
@@ -185,19 +295,8 @@ dosounds(void)
         }
     }
     if (g.level.flags.has_zoo && !rn2(200)) {
-        static const char *const zoo_msg[3] = {
-            "a sound reminiscent of an elephant stepping on a peanut.",
-            "a sound reminiscent of a seal barking.", "Doctor Dolittle!",
-        };
-        for (mtmp = fmon; mtmp; mtmp = mtmp->nmon) {
-            if (DEADMONSTER(mtmp))
-                continue;
-            if ((mtmp->msleeping || is_animal(mtmp->data))
-                && mon_in_room(mtmp, ZOO)) {
-                You_hear1(zoo_msg[rn2(2) + hallu]);
-                return;
-            }
-        }
+        if (get_iter_mons(zoo_mon_sound))
+            return;
     }
     if (g.level.flags.has_shop && !rn2(200)) {
         if (!(sroom = search_special(ANY_SHOP))) {
@@ -217,77 +316,14 @@ dosounds(void)
     }
     if (g.level.flags.has_temple && !rn2(200)
         && !(Is_astralevel(&u.uz) || Is_sanctum(&u.uz))) {
-        for (mtmp = fmon; mtmp; mtmp = mtmp->nmon) {
-            if (DEADMONSTER(mtmp))
-                continue;
-            if (mtmp->ispriest && inhistemple(mtmp)
-                /* priest must be active */
-                && !helpless(mtmp)
-                /* hero must be outside this temple */
-                && temple_occupied(u.urooms) != EPRI(mtmp)->shroom)
-                break;
-        }
-        if (mtmp) {
-            /* Generic temple messages; no attempt to match topic or tone
-               to the pantheon involved, let alone to the specific deity.
-               These are assumed to be coming from the attending priest;
-               asterisk means that the priest must be capable of speech;
-               pound sign (octathorpe,&c--don't go there) means that the
-               priest and the altar must not be directly visible (we don't
-               care if telepathy or extended detection reveals that the
-               priest is not currently standing on the altar; he's mobile). */
-            static const char *const temple_msg[] = {
-                "*someone praising %s.", "*someone beseeching %s.",
-                "#an animal carcass being offered in sacrifice.",
-                "*a strident plea for donations.",
-            };
-            const char *msg;
-            int trycount = 0, ax = EPRI(mtmp)->shrpos.x,
-                ay = EPRI(mtmp)->shrpos.y;
-            boolean speechless = (mtmp->data->msound <= MS_ANIMAL),
-                    in_sight = canseemon(mtmp) || cansee(ax, ay);
-
-            do {
-                msg = temple_msg[rn2(SIZE(temple_msg) - 1 + hallu)];
-                if (index(msg, '*') && speechless)
-                    continue;
-                if (index(msg, '#') && in_sight)
-                    continue;
-                break; /* msg is acceptable */
-            } while (++trycount < 50);
-            while (!letter(*msg))
-                ++msg; /* skip control flags */
-            if (index(msg, '%'))
-                You_hear(msg, halu_gname(EPRI(mtmp)->shralign));
-            else
-                You_hear1(msg);
+        if (get_iter_mons(temple_priest_sound))
             return;
-        }
     }
     if (Is_oracle_level(&u.uz) && !rn2(400)) {
-        /* make sure the Oracle is still here */
-        for (mtmp = fmon; mtmp; mtmp = mtmp->nmon) {
-            if (DEADMONSTER(mtmp))
-                continue;
-            if (mtmp->data == &mons[PM_ORACLE])
-                break;
-        }
-        /* and don't produce silly effects when she's clearly visible */
-        if (mtmp && (hallu || !canseemon(mtmp))) {
-            static const char *const ora_msg[5] = {
-                "a strange wind.",     /* Jupiter at Dodona */
-                "convulsive ravings.", /* Apollo at Delphi */
-                "snoring snakes.",     /* AEsculapius at Epidaurus */
-                "someone say \"No more woodchucks!\"",
-                "a loud ZOT!" /* both rec.humor.oracle */
-            };
-            You_hear1(ora_msg[rn2(3) + hallu * 2]);
-        }
-        return;
+        if (get_iter_mons(oracle_sound))
+            return;
     }
 }
-
-RESTORE_WARNING_FORMAT_NONLITERAL
 
 static const char *const h_sounds[] = {
     "beep",   "boing",   "sing",   "belche", "creak",   "cough",
@@ -590,9 +626,6 @@ domonnoise(register struct monst* mtmp)
     /* silliness, with slight chance to interfere with shopping */
     else if (Hallucination && mon_is_gecko(mtmp))
         msound = MS_SELL;
-        
-    if (ptr == &mons[PM_VLAD_THE_IMPALER])
-        msound = MS_BUNNICULA;
 
     /* be sure to do this before talking; the monster might teleport away, in
      * which case we want to check its pre-teleport position
@@ -601,9 +634,6 @@ domonnoise(register struct monst* mtmp)
         map_invisible(mtmp->mx, mtmp->my);
 
     switch (msound) {
-    case MS_BUNNICULA:
-        verbl_msg = "I only drink... carrot juice.";
-        break;
     case MS_ORACLE:
         return doconsult(mtmp); /* check this */
     case MS_PRIEST:
@@ -1392,12 +1422,18 @@ add_sound_mapping(const char* mapping)
     char text[256];
     char filename[256];
     char filespec[256];
+    char msgtyp[11];
     int volume, idx = -1;
 
-    if (sscanf(mapping, "MESG \"%255[^\"]\"%*[\t ]\"%255[^\"]\" %d %d", text,
-               filename, &volume, &idx) == 4
-        || sscanf(mapping, "MESG \"%255[^\"]\"%*[\t ]\"%255[^\"]\" %d", text,
-               filename, &volume) == 3) {
+    msgtyp[0] = '\0';
+    if (sscanf(mapping, "MESG \"%255[^\"]\"%*[\t ]\"%255[^\"]\" %d %d",
+               text, filename, &volume, &idx) == 4
+        || sscanf(mapping, "MESG %10[^\"] \"%255[^\"]\"%*[\t ]\"%255[^\"]\" %d %d",
+                  msgtyp, text, filename, &volume, &idx) == 5
+        || sscanf(mapping, "MESG %10[^\"] \"%255[^\"]\"%*[\t ]\"%255[^\"]\" %d",
+                  msgtyp, text, filename, &volume) == 4
+        || sscanf(mapping, "MESG \"%255[^\"]\"%*[\t ]\"%255[^\"]\" %d",
+                  text, filename, &volume) == 3) {
         audio_mapping *new_map;
 
         if (!sounddir)
@@ -1405,7 +1441,7 @@ add_sound_mapping(const char* mapping)
         if (strlen(sounddir) + 1 + strlen(filename) >= sizeof filespec) {
             raw_print("sound file name too long");
             return 0;
-	}
+        }
         Snprintf(filespec, sizeof filespec, "%s/%s", sounddir, filename);
 
         if (idx >= 0 || can_read_file(filespec)) {
@@ -1417,7 +1453,8 @@ add_sound_mapping(const char* mapping)
             new_map->next = soundmap;
 
             if (!regex_compile(text, new_map->regex)) {
-                const char *re_error_desc = regex_error_desc(new_map->regex);
+                char errbuf[BUFSZ];
+                char *re_error_desc = regex_error_desc(new_map->regex, errbuf);
 
                 regex_free(new_map->regex);
                 free((genericptr_t) new_map->filename);
@@ -1425,6 +1462,12 @@ add_sound_mapping(const char* mapping)
                 raw_print(re_error_desc);
                 return 0;
             } else {
+                if (*msgtyp) {
+                    char tmpbuf[BUFSZ];
+
+                    Sprintf(tmpbuf, "%.10s \"%.230s\"", msgtyp, text);
+                    (void) msgtype_parse_add(tmpbuf);
+                }
                 soundmap = new_map;
             }
         } else {
@@ -1474,16 +1517,16 @@ maybe_play_sound(const char* msg)
         && !iflags.vt_sounddata
 #endif
 #if defined(QT_GRAPHICS)
-        && WINDOWPORT("Qt")
+        && WINDOWPORT(Qt)
 #endif
 #if defined(WIN32)
-        && (WINDOWPORT("tty") || WINDOWPORT("mswin") || WINDOWPORT("curses"))
+        && (WINDOWPORT(tty) || WINDOWPORT(mswin) || WINDOWPORT(curses))
 #endif
 #endif /* WIN32 || QT_GRAPHICS */
         )
         play_usersound(snd->filename, snd->volume);
 #if defined(TTY_GRAPHICS) && defined(TTY_SOUND_ESCCODES)
-    else if (snd && iflags.vt_sounddata && snd->idx >= 0 && WINDOWPORT("tty"))
+    else if (snd && iflags.vt_sounddata && snd->idx >= 0 && WINDOWPORT(tty))
         play_usersound_via_idx(snd->idx, snd->volume);
 #endif  /* TTY_GRAPHICS && TTY_SOUND_ESCCODES */
 #endif  /* WIN32 || QT_GRAPHICS || TTY_SOUND_ESCCODES */

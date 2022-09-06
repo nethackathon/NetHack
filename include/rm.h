@@ -1,4 +1,4 @@
-/* NetHack 3.7	rm.h	$NHDT-Date: 1599434249 2020/09/06 23:17:29 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.84 $ */
+/* NetHack 3.7	rm.h	$NHDT-Date: 1657918091 2022/07/15 20:48:11 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.96 $ */
 /* Copyright (c) Stichting Mathematisch Centrum, Amsterdam, 1985. */
 /*-Copyright (c) Pasi Kallinen, 2017. */
 /* NetHack may be freely redistributed.  See license for details. */
@@ -309,15 +309,15 @@ struct rm {
  * directions.  If we know the type of wall and the directions from which
  * it has been seen, then we can determine what it looks like to the hero.
  */
-#define SV0   0x01
-#define SV1   0x02
-#define SV2   0x04
-#define SV3   0x08
-#define SV4   0x10
-#define SV5   0x20
-#define SV6   0x40
-#define SV7   0x80
-#define SVALL 0xFF
+#define SV0   ((seenV) 0x01)
+#define SV1   ((seenV) 0x02)
+#define SV2   ((seenV) 0x04)
+#define SV3   ((seenV) 0x08)
+#define SV4   ((seenV) 0x10)
+#define SV5   ((seenV) 0x20)
+#define SV6   ((seenV) 0x40)
+#define SV7   ((seenV) 0x80)
+#define SVALL ((seenV) 0xFF)
 
 /* if these get changed or expanded, make sure wizard-mode wishing becomes
    aware of the new usage */
@@ -352,7 +352,7 @@ struct cemetery {
     /* date+time in string of digits rather than binary */
     char when[4 + 2 + 2 + 2 + 2 + 2 + 1]; /* "YYYYMMDDhhmmss\0" */
     /* final resting place spot */
-    xchar frpx, frpy;
+    coordxy frpx, frpy;
     boolean bonesknown;
 };
 
@@ -412,8 +412,8 @@ typedef struct {
  * Convert a defsym number into a trap number.
  * Assumes that arrow trap will always be the first trap.
  */
-#define trap_to_defsym(t) (S_arrow_trap + (t) -1)
-#define defsym_to_trap(d) ((d) -S_arrow_trap + 1)
+#define trap_to_defsym(t) (S_arrow_trap + (t) - 1)
+#define defsym_to_trap(d) ((d) - S_arrow_trap + 1)
 
 #define OBJ_AT(x, y) (g.level.objects[x][y] != (struct obj *) 0)
 /*

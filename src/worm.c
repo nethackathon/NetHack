@@ -1,4 +1,4 @@
-/* NetHack 3.7	worm.c	$NHDT-Date: 1608236444 2020/12/17 20:20:44 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.49 $ */
+/* NetHack 3.7	worm.c	$NHDT-Date: 1652689653 2022/05/16 08:27:33 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.56 $ */
 /* Copyright (c) Stichting Mathematisch Centrum, Amsterdam, 1985. */
 /*-Copyright (c) Robert Patrick Rankin, 2009. */
 /* NetHack may be freely redistributed.  See license for details. */
@@ -11,7 +11,7 @@
 /* worm segment structure */
 struct wseg {
     struct wseg *nseg;
-    xchar wx, wy; /* the segment's position */
+    coordxy wx, wy; /* the segment's position */
 };
 
 static void toss_wsegs(struct wseg *, boolean);
@@ -297,23 +297,36 @@ worm_nomove(struct monst *worm)
 /*
  *  wormgone()
  *
- *  Check for mon->wormno before calling this function!
+ *  Kill a worm tail.  Also takes the head off the map.  Caller needs to
+ *  keep track of what its coordinates were if planning to put it back.
  *
- *  Kill a worm tail.
+ *  Should only be called when mon->wormno is non-zero.
  */
 void
 wormgone(struct monst *worm)
 {
     int wnum = worm->wormno;
 
-    worm->wormno = 0;
-    /*  This will also remove the real monster (ie 'w') from the its
-     *  position in level.monsters[][].
+    if (!wnum) /* note: continuing with wnum==0 runs to completion */
+        impossible("wormgone: wormno is 0");
+
+    worm->wormno = 0; /* still a long worm but doesn't grow/shrink anymore */
+    /*
+     *  This will also remove the real monster (ie 'w') from the its
+     *  position in level.monsters[][].  (That happens when removing
+     *  the hidden tail segment which is co-located with the head.)
      */
     toss_wsegs(wtails[wnum], TRUE);
 
     wheads[wnum] = wtails[wnum] = (struct wseg *) 0;
     wgrowtime[wnum] = 0L;
+
+    /* we don't expect to encounter this here but check for it anyway;
+       when a long worm gets created by a polymorph zap, it gets flagged
+       with MCORPSENM()==PM_LONG_WORM so that the same zap won't trigger
+       another polymorph if it hits the new tail */
+    if (worm->data == &mons[PM_LONG_WORM] && has_mcorpsenm(worm))
+        MCORPSENM(worm) = NON_PM; /* no longer polymorph-proof */
 }
 
 /*
@@ -355,7 +368,7 @@ wormhitu(struct monst *worm)
  *  that both halves will survive.
  */
 void
-cutworm(struct monst *worm, xchar x, xchar y,
+cutworm(struct monst *worm, coordxy x, coordxy y,
         boolean cuttier) /* hit is by wielded blade or axe or by thrown axe */
 {
     struct wseg *curr, *new_tail;
@@ -608,7 +621,7 @@ place_wsegs(struct monst *worm, struct monst *oldworm)
     struct wseg *curr = wtails[worm->wormno];
 
     while (curr != wheads[worm->wormno]) {
-        xchar x = curr->wx, y = curr->wy;
+        coordxy x = curr->wx, y = curr->wy;
         struct monst *mtmp = m_at(x, y);
 
         if (oldworm && mtmp == oldworm)
@@ -726,7 +739,7 @@ remove_worm(struct monst *worm)
  *  be, if somehow the head is disjoint from the tail.
  */
 void
-place_worm_tail_randomly(struct monst *worm, xchar x, xchar y)
+place_worm_tail_randomly(struct monst *worm, coordxy x, coordxy y)
 {
     int wnum = worm->wormno;
     struct wseg *curr = wtails[wnum];
@@ -763,42 +776,12 @@ place_worm_tail_randomly(struct monst *worm, xchar x, xchar y)
     new_tail->wy = y;
 
     while (curr) {
-        int nx = 0, ny = 0;
-#if 0   /* old code */
-        int trycnt = 0;
+        coordxy nx = ox, ny = oy;
 
-        /* pick a random direction from x, y and test for goodpos() */
-        do {
-            random_dir(ox, oy, &nx, &ny);
-        } while (!goodpos(nx, ny, worm, 0) && ++tryct <= 50);
-
-        if (tryct <= 50)
-#else   /* new code */
-        int i, j, k, dirs[N_DIRS];
-
-        /* instead of picking a random direction up to 50 times, try each
-           of the eight directions at most once after shuffling their order */
-        for (i = 0; i < N_DIRS; ++i)
-            dirs[i] = i;
-        for (i = N_DIRS; i > 0; --i) {
-            j = rn2(i);
-            k = dirs[j];
-            dirs[j] = dirs[i - 1];
-            dirs[i - 1] = k;
-        }
-        for (i = 0; i < N_DIRS; ++i) {
-            nx = ox + xdir[dirs[i]];
-            ny = oy + ydir[dirs[i]];
-            if (goodpos(nx, ny, worm, 0)) /* includes an isok() check */
-                break;
-        }
-
-        if (i < N_DIRS)
-#endif
-        {
+        if (rnd_nextto_goodpos(&nx, &ny, worm)) {
             place_worm_seg(worm, nx, ny);
-            curr->wx = (xchar) (ox = nx);
-            curr->wy = (xchar) (oy = ny);
+            curr->wx = (coordxy) (ox = nx);
+            curr->wy = (coordxy) (oy = ny);
             wtails[wnum] = curr;
             curr = curr->nseg;
             wtails[wnum]->nseg = new_tail;
@@ -972,7 +955,7 @@ wseg_at(struct monst *worm, int x, int y)
     if (worm && worm->wormno && m_at(x, y) == worm) {
         struct wseg *curr;
         int i, n;
-        xchar wx = (xchar) x, wy = (xchar) y;
+        coordxy wx = (coordxy) x, wy = (coordxy) y;
 
         for (i = 0, curr = wtails[worm->wormno]; curr; curr = curr->nseg) {
             if (curr->wx == wx && curr->wy == wy)
@@ -992,8 +975,8 @@ flip_worm_segs_vertical(struct monst *worm, int miny, int maxy)
     struct wseg *curr = wtails[worm->wormno];
 
     while (curr) {
-	curr->wy = (maxy - curr->wy + miny);
-	curr = curr->nseg;
+        curr->wy = (maxy - curr->wy + miny);
+        curr = curr->nseg;
     }
 }
 
@@ -1003,8 +986,8 @@ flip_worm_segs_horizontal(struct monst *worm, int minx, int maxx)
     struct wseg *curr = wtails[worm->wormno];
 
     while (curr) {
-	curr->wx = (maxx - curr->wx + minx);
-	curr = curr->nseg;
+        curr->wx = (maxx - curr->wx + minx);
+        curr = curr->nseg;
     }
 }
 

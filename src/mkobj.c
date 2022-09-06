@@ -1,4 +1,4 @@
-/* NetHack 3.7	mkobj.c	$NHDT-Date: 1648835240 2022/04/01 17:47:20 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.236 $ */
+/* NetHack 3.7	mkobj.c	$NHDT-Date: 1654881236 2022/06/10 17:13:56 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.237 $ */
 /* Copyright (c) Stichting Mathematisch Centrum, Amsterdam, 1985. */
 /*-Copyright (c) Derek S. Ray, 2015. */
 /* NetHack may be freely redistributed.  See license for details. */
@@ -9,7 +9,7 @@ static void mkbox_cnts(struct obj *);
 static unsigned nextoid(struct obj *, struct obj *);
 static int item_on_ice(struct obj *);
 static void shrinking_glob_gone(struct obj *);
-static void obj_timer_checks(struct obj *, xchar, xchar, int);
+static void obj_timer_checks(struct obj *, coordxy, coordxy, int);
 static void container_weight(struct obj *);
 static struct obj *save_mtraits(struct obj *, struct monst *);
 static void objlist_sanity(struct obj *, int, const char *);
@@ -168,7 +168,7 @@ free_omailcmd(struct obj *otmp)
 }
 
 struct obj *
-mkobj_at(char let, int x, int y, boolean artif)
+mkobj_at(char let, coordxy x, coordxy y, boolean artif)
 {
     struct obj *otmp;
 
@@ -178,7 +178,7 @@ mkobj_at(char let, int x, int y, boolean artif)
 }
 
 struct obj *
-mksobj_at(int otyp, int x, int y, boolean init, boolean artif)
+mksobj_at(int otyp, coordxy x, coordxy y, boolean init, boolean artif)
 {
     struct obj *otmp;
 
@@ -268,9 +268,6 @@ mkbox_cnts(struct obj *box)
     case BAG_OF_HOLDING:
         n = 1;
         break;
-    case FABERGE_EGG:
-        n = 1;
-        break;
     default:
         n = 0;
         break;
@@ -309,7 +306,7 @@ mkbox_cnts(struct obj *box)
                         otmp->quan = 1L;
                     otmp->owt = weight(otmp);
                 }
-            if (box->otyp == BAG_OF_HOLDING || box->otyp == FABERGE_EGG) {
+            if (box->otyp == BAG_OF_HOLDING) {
                 if (Is_mbag(otmp)) {
                     otmp->otyp = SACK;
                     otmp->spe = 0;
@@ -327,12 +324,19 @@ mkbox_cnts(struct obj *box)
 int
 rndmonnum(void)
 {
+    return rndmonnum_adj(0, 0);
+}
+
+/* select a random, common monster type, with adjusted difficulty */
+int
+rndmonnum_adj(int minadj, int maxadj)
+{
     register struct permonst *ptr;
     register int i;
     unsigned short excludeflags;
 
     /* Plan A: get a level-appropriate common monster */
-    ptr = rndmonst();
+    ptr = rndmonst_adj(minadj, maxadj);
     if (ptr)
         return monsndx(ptr);
 
@@ -409,10 +413,16 @@ splitobj(struct obj *obj, long num)
     g.context.objsplit.parent_oid = obj->o_id;
     g.context.objsplit.child_oid = otmp->o_id;
     obj->nobj = otmp;
-    /* Only set nexthere when on the floor, nexthere is also used */
-    /* as a back pointer to the container object when contained. */
+    /* Only set nexthere when on the floor; nexthere is also used
+       as a back pointer to the container object when contained.
+       For either case, otmp's nexthere pointer is already pointing
+       at the right thing. */
     if (obj->where == OBJ_FLOOR)
-        obj->nexthere = otmp;
+        obj->nexthere = otmp; /* insert into chain: obj -> otmp -> next */
+    /* lua isn't tracking the split off portion even if it happens to
+       be tracking the original */
+    if (otmp->where == OBJ_LUAFREE)
+        otmp->where = OBJ_FREE;
     copy_oextra(otmp, obj);
     if (has_omid(otmp))
         free_omid(otmp); /* only one association with m_id*/
@@ -674,7 +684,7 @@ static const char *const alteration_verbs[] = {
 void
 costly_alteration(struct obj *obj, int alter_type)
 {
-    xchar ox, oy;
+    coordxy ox, oy;
     char objroom;
     boolean learn_bknown;
     const char *those, *them;
@@ -814,7 +824,7 @@ mksobj(int otyp, boolean init, boolean artif)
             if (is_poisonable(otmp) && !rn2(100))
                 otmp->opoisoned = 1;
 
-            if (artif && !rn2(20))
+            if (artif && !rn2(20 + (10 * nartifact_exist())))
                 otmp = mk_artifact(otmp, (aligntyp) A_NONE);
             break;
         case FOOD_CLASS:
@@ -943,9 +953,6 @@ mksobj(int otyp, boolean init, boolean artif)
             case BAG_OF_HOLDING:
                 mkbox_cnts(otmp);
                 break;
-            case FABERGE_EGG:
-                mkbox_cnts(otmp);
-                break;
             case EXPENSIVE_CAMERA:
             case TINNING_KIT:
             case MAGIC_MARKER:
@@ -965,8 +972,9 @@ mksobj(int otyp, boolean init, boolean artif)
                 break;
             case FIGURINE:
                 tryct = 0;
+                /* figurines are slightly harder monsters */
                 do
-                    otmp->corpsenm = rndmonnum();
+                    otmp->corpsenm = rndmonnum_adj(5, 10);
                 while (is_human(&mons[otmp->corpsenm]) && tryct++ < 30);
                 blessorcurse(otmp, 4);
                 break;
@@ -1020,7 +1028,7 @@ mksobj(int otyp, boolean init, boolean artif)
                 otmp->spe = rne(3);
             } else
                 blessorcurse(otmp, 10);
-            if (artif && !rn2(40))
+            if (artif && !rn2(40 + (10 * nartifact_exist())))
                 otmp = mk_artifact(otmp, (aligntyp) A_NONE);
             /* simulate lacquered armor for samurai */
             if (Role_if(PM_SAMURAI) && otmp->otyp == SPLINT_MAIL
@@ -1293,7 +1301,7 @@ static int
 item_on_ice(struct obj *item)
 {
     struct obj *otmp;
-    xchar ox, oy;
+    coordxy ox, oy;
 
     otmp = item;
     /* if in a container, it might be nested so find outermost one since
@@ -1491,7 +1499,7 @@ shrink_glob(
     }
 
     if (gone) {
-        xchar ox = 0, oy = 0;
+        coordxy ox = 0, oy = 0;
         /* check location for visibility before destroying obj */
         boolean seeit = (obj->where == OBJ_FLOOR
                          && get_obj_location(obj, &ox, &oy, 0)
@@ -1522,7 +1530,7 @@ shrink_glob(
 static void
 shrinking_glob_gone(struct obj *obj)
 {
-    xchar owhere = obj->where;
+    xint16 owhere = obj->where;
 
     if (owhere == OBJ_INVENT) {
         if (obj->owornmask) {
@@ -1554,7 +1562,7 @@ void
 maybe_adjust_light(struct obj *obj, int old_range)
 {
     char buf[BUFSZ];
-    xchar ox, oy;
+    coordxy ox, oy;
     int new_range = arti_light_radius(obj), delta = new_range - old_range;
 
     /* radius of light emitting artifact varies by curse/bless state
@@ -1604,7 +1612,7 @@ bless(struct obj *otmp)
     otmp->blessed = 1;
     if (carried(otmp) && confers_luck(otmp))
         set_moreluck();
-    else if (otmp->otyp == BAG_OF_HOLDING || otmp->otyp == FABERGE_EGG)
+    else if (otmp->otyp == BAG_OF_HOLDING)
         otmp->owt = weight(otmp);
     else if (otmp->otyp == FIGURINE && otmp->timed)
         (void) stop_timer(FIG_TRANSFORM, obj_to_any(otmp));
@@ -1623,7 +1631,7 @@ unbless(struct obj *otmp)
     otmp->blessed = 0;
     if (carried(otmp) && confers_luck(otmp))
         set_moreluck();
-    else if (otmp->otyp == BAG_OF_HOLDING || otmp->otyp == FABERGE_EGG)
+    else if (otmp->otyp == BAG_OF_HOLDING)
         otmp->owt = weight(otmp);
     if (otmp->lamplit)
         maybe_adjust_light(otmp, old_light);
@@ -1652,7 +1660,7 @@ curse(struct obj *otmp)
     /* some cursed items need immediate updating */
     if (carried(otmp) && confers_luck(otmp)) {
         set_moreluck();
-    } else if (otmp->otyp == BAG_OF_HOLDING || otmp->otyp == FABERGE_EGG) {
+    } else if (otmp->otyp == BAG_OF_HOLDING) {
         otmp->owt = weight(otmp);
     } else if (otmp->otyp == FIGURINE) {
         if (otmp->corpsenm != NON_PM && !dead_species(otmp->corpsenm, TRUE)
@@ -1678,7 +1686,7 @@ uncurse(struct obj *otmp)
     otmp->cursed = 0;
     if (carried(otmp) && confers_luck(otmp))
         set_moreluck();
-    else if (otmp->otyp == BAG_OF_HOLDING || otmp->otyp == FABERGE_EGG)
+    else if (otmp->otyp == BAG_OF_HOLDING)
         otmp->owt = weight(otmp);
     else if (otmp->otyp == FIGURINE && otmp->timed)
         (void) stop_timer(FIG_TRANSFORM, obj_to_any(otmp));
@@ -1781,7 +1789,7 @@ weight(struct obj *obj)
          *  The macro DELTA_CWT in pickup.c also implements these
          *  weight equations.
          */
-        if (obj->otyp == BAG_OF_HOLDING || obj->otyp == FABERGE_EGG)
+        if (obj->otyp == BAG_OF_HOLDING)
             cwt = obj->cursed ? (cwt * 2)
                   : obj->blessed ? ((cwt + 3) / 4)
                     : ((cwt + 1) / 2); /* uncursed */
@@ -1815,14 +1823,14 @@ static const int treefruits[] = {
 
 /* called when a tree is kicked; never returns Null */
 struct obj *
-rnd_treefruit_at(int x, int y)
+rnd_treefruit_at(coordxy x, coordxy y)
 {
     return mksobj_at(treefruits[rn2(SIZE(treefruits))], x, y, TRUE, FALSE);
 }
 
 /* create a stack of N gold pieces; never returns Null */
 struct obj *
-mkgold(long amount, int x, int y)
+mkgold(long amount, coordxy x, coordxy y)
 {
     struct obj *gold = g_at(x, y);
 
@@ -1862,7 +1870,7 @@ mkcorpstat(
     int objtype,          /* CORPSE or STATUE */
     struct monst *mtmp,   /* dead monster, might be Null */
     struct permonst *ptr, /* if non-Null, overrides mtmp->mndx */
-    int x, int y,         /* where to place corpse; <0,0> => random */
+    coordxy x, coordxy y,         /* where to place corpse; <0,0> => random */
     unsigned corpstatflags)
 {
     struct obj *otmp;
@@ -1982,6 +1990,7 @@ save_mtraits(struct obj *obj, struct monst *mtmp)
             mtmp2->mhp = mtmp2->mhpmax;
         if (mtmp2->mhp < 1)
             mtmp2->mhp = 0;
+        mtmp2->mstate &= ~MON_DETACH;
     }
     return obj;
 }
@@ -2018,7 +2027,7 @@ get_mtraits(struct obj *obj, boolean copyof)
 struct obj *
 mk_tt_object(
     int objtype, /* CORPSE or STATUE */
-    int x, int y)
+    coordxy x, coordxy y)
 {
     struct obj *otmp;
     boolean initialize_it;
@@ -2045,7 +2054,7 @@ struct obj *
 mk_named_object(
     int objtype, /* CORPSE or STATUE */
     struct permonst *ptr,
-    int x, int y,
+    coordxy x, coordxy y,
     const char *nm)
 {
     struct obj *otmp;
@@ -2093,7 +2102,7 @@ is_rottable(struct obj *otmp)
 
 /* put the object at the given location */
 void
-place_object(struct obj *otmp, int x, int y)
+place_object(struct obj *otmp, coordxy x, coordxy y)
 {
     register struct obj *otmp2;
 
@@ -2153,7 +2162,7 @@ place_object(struct obj *otmp, int x, int y)
  * Also used for starting ice effects too. [zap.c]
  */
 void
-obj_ice_effects(int x, int y, boolean do_buried)
+obj_ice_effects(coordxy x, coordxy y, boolean do_buried)
 {
     struct obj *otmp;
 
@@ -2198,7 +2207,7 @@ peek_at_iced_corpse_age(struct obj *otmp)
 static void
 obj_timer_checks(
     struct obj *otmp,
-    xchar x, xchar y,
+    coordxy x, coordxy y,
     int force) /* 0 = no force so do checks, <0 = force off, >0 force on */
 {
     long tleft = 0L;
@@ -2266,8 +2275,8 @@ obj_timer_checks(
 void
 remove_object(struct obj *otmp)
 {
-    xchar x = otmp->ox;
-    xchar y = otmp->oy;
+    coordxy x = otmp->ox;
+    coordxy y = otmp->oy;
 
     if (otmp->where != OBJ_FLOOR)
         panic("remove_object: obj not on floor");
@@ -2621,7 +2630,7 @@ static const char NEARDATA /* pline formats for insane_object() */
 void
 obj_sanity_check(void)
 {
-    int x, y;
+    coordxy x, y;
     struct obj *obj, *otop, *prevo;
 
     objlist_sanity(fobj, OBJ_FLOOR, "floor sanity");
@@ -3185,7 +3194,7 @@ obj_nexto(struct obj *otmp)
  * reliably predict which one we want to 'find' first
  */
 struct obj *
-obj_nexto_xy(struct obj *obj, int x, int y, boolean recurs)
+obj_nexto_xy(struct obj *obj, coordxy x, coordxy y, boolean recurs)
 {
     struct obj *otmp;
     int fx, fy, ex, ey, otyp = obj->otyp;

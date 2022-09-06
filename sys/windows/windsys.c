@@ -201,7 +201,7 @@ VA_DECL(const char *, s)
     /* error() may get called before tty is initialized */
     if (iflags.window_inited)
         end_screen();
-    if (WINDOWPORT("tty")) {
+    if (WINDOWPORT(tty)) {
         buf[0] = '\n';
         (void) vsnprintf(&buf[1], sizeof buf - (1 + sizeof "\n"), s, VA_ARGS);
         Strcat(buf, "\n");
@@ -228,12 +228,12 @@ win32_abort(void)
 {
     int c;
 
-    if (WINDOWPORT("mswin") || WINDOWPORT("tty")) {
+    if (WINDOWPORT(mswin) || WINDOWPORT(tty)) {
         if (iflags.window_inited)
             exit_nhwindows((char *) 0);
         iflags.window_inited = FALSE;
     }
-    if (!WINDOWPORT("mswin") && !WINDOWPORT("safe-startup"))
+    if (!WINDOWPORT(mswin) && !WINDOWPORT(safestartup))
         safe_routines();
     if (wizard) {
         raw_print("Execute debug breakpoint wizard?");
@@ -469,6 +469,7 @@ windows_console_custom_nhgetch(void)
     return _getch();
 }
 
+extern int windows_console_custom_nhgetch(void);
 
 void
 getreturn(const char *str)
@@ -481,6 +482,8 @@ getreturn(const char *str)
     in_getreturn = TRUE;
     Sprintf(buf,"Hit <Enter> %s.", str);
     raw_print(buf);
+    if (WINDOWPORT(tty))
+        windows_console_custom_nhgetch();
     wait_synch();
     in_getreturn = FALSE;
     return;
@@ -490,8 +493,8 @@ getreturn(const char *str)
    initializing the window port */
 void nethack_enter_windows(void)
 {
-	if (WINDOWPORT("tty"))
-		nethack_enter_consoletty();
+    if (WINDOWPORT(tty))
+        nethack_enter_consoletty();
 }
 
 /* CP437 to Unicode mapping according to the Unicode Consortium */

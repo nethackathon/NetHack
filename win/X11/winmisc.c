@@ -1556,8 +1556,9 @@ X11_get_ext_cmd(void)
     /* The callbacks will enable the event loop exit. */
     (void) x_event(EXIT_ON_EXIT);
 
-    if (extended_cmd_selected < 0)
+    if (extended_cmd_selected < 0) {
         return -1;
+    }
     return command_indx[extended_cmd_selected];
 }
 

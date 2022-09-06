@@ -1,7 +1,7 @@
 strategy:
   matrix:
-    linux_focal_gcc9_minimal:
-      imageName: 'ubuntu-20.04'
+    linux_latest_gcc9_minimal:
+      imageName: 'ubuntu-latest'
       toolchainName: gcc9
       buildTargetName: minimal
     linux_focal_clang_all:
@@ -16,22 +16,20 @@ strategy:
       imageName: 'ubuntu-20.04'
       toolchainName: gcc10
       buildTargetName: all
-    linux_bionic_gcc7_all:
-      imageName: 'ubuntu-18.04'
-      toolchainName: gcc7
+    linux_jammy_gcc11_all:
+      imageName: 'ubuntu-22.04'
+      toolchainName: gcc11
       buildTargetName: all
-# build is currently broken
-#    mac_catalina_gcc8_all:
-#      imageName: 'macOS-10.15'
-#      ccName: gcc-8
-#      cxxName: g++-8
-#      buildSetting: 'all'
-    mac_catalina_clang_all:
-      imageName: 'macOS-10.15'
+    macOS_latest_clang_all:
+      imageName: 'macOS-latest'
+      toolchainName: clang
+      buildTargetName: all
+    macOS_monterey_clang13_all:
+      imageName: 'macOS-12'
       toolchainName: clang
       buildTargetName: all
     windows-visualstudio:
-      imageName: 'windows-2019'
+      imageName: 'windows-latest'
       toolchainName: vs
       buildTargetName: all
     windows-mingw:
@@ -42,6 +40,11 @@ strategy:
       imageName: 'ubuntu-20.04'
       toolchainName: cross
       buildTargetName: msdos
+    linux_jammy_docs:
+      imageName: 'ubuntu-22.04'
+      toolchainName: docs
+      buildTargetName: all
+      continueOnError: true
 
 pool:
   vmImage: $(imageName)
@@ -75,6 +78,11 @@ steps:
     then
       echo "##vso[task.setvariable variable=CC]gcc-10"
       echo "##vso[task.setvariable variable=CXX]g++-10"
+    fi
+    if [ "$(toolchain)" == "gcc11" ]
+    then
+      echo "##vso[task.setvariable variable=CC]gcc-11"
+      echo "##vso[task.setvariable variable=CXX]g++-11"
     fi
     if [ "$(toolchain)" == "clang" ]
     then
@@ -115,12 +123,6 @@ steps:
   condition: eq( variables.toolchain, 'vs' )
   displayName: 'Copying store key'
 
-- task: NuGetCommand@2
-  inputs:
-    command: 'restore'
-    restoreSolution: '$(Agent.BuildDirectory)/$(netHackPath)/sys/windows/vs/NetHack.sln'
-    feedsToUse: 'select'
-
 - task: MSBuild@1
   inputs:
     solution: $(Agent.BuildDirectory)/$(netHackPath)/sys/windows/vs/NetHack.sln
@@ -139,13 +141,13 @@ steps:
     export LUA_VERSION=5.4.4
     #
     # 64-bit
-    #export CURLSRC=https://github.com/brechtsanders/winlibs_mingw/releases/download/11.2.0-9.0.0-ucrt-r4/winlibs-x86_64-posix-seh-gcc-11.2.0-mingw-w64ucrt-9.0.0-r4.zip
+    #export CURLSRC=https://github.com/brechtsanders/winlibs_mingw/releases/download/11.2.0-9.0.0-ucrt-r5/winlibs-x86_64-posix-seh-gcc-11.2.0-mingw-w64ucrt-9.0.0-r5.zip
     #export CURLDST=mingw-x64.zip
     #export MINGWBIN=mingw64
     #export MSYSTEM=MINGW64
     #
     # 32-bit
-    export CURLSRC=https://github.com/brechtsanders/winlibs_mingw/releases/download/11.2.0-9.0.0-ucrt-r4/winlibs-i686-posix-dwarf-gcc-11.2.0-mingw-w64ucrt-9.0.0-r4.zip
+    export CURLSRC=https://github.com/brechtsanders/winlibs_mingw/releases/download/11.2.0-9.0.0-ucrt-r5/winlibs-i686-posix-dwarf-gcc-11.2.0-mingw-w64ucrt-9.0.0-r5.zip
     export CURLDST=mingw-x86.zip
     export MINGWBIN=mingw32
     export MSYSTEM=MINGW32
@@ -227,7 +229,7 @@ steps:
   displayName: 'Building mac full build'
 
 - bash: |
-    export GCCVER=gcc1020
+    export GCCVER=gcc1210
     cd sys/unix
     sh setup.sh hints/linux.370
     cd ../..
@@ -238,3 +240,11 @@ steps:
   condition: and(eq( variables['Agent.OS'], 'Linux' ), eq( variables.toolchain, 'cross'))
   workingDirectory: $(Agent.BuildDirectory)/$(netHackPath)
   displayName: 'Building MSDOS build'
+- bash: |
+    sudo apt-get install texlive
+    make Guidebook
+    make Guidebook.txt
+    make Guidebook.pdf
+  condition: and(eq( variables['Agent.OS'], 'Linux' ), eq( variables.toolchain, 'docs'))
+  workingDirectory: $(Agent.BuildDirectory)/$(netHackPath)
+  displayName: 'Building NetHack documentation'

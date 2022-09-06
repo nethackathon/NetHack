@@ -1,4 +1,4 @@
-# NetHack 3.7 Makefile.msc
+# NetHack 3.7 Makefile.nmake
 #       Copyright (c) NetHack Development Team 1993-2022
 #
 #==============================================================================
@@ -8,9 +8,9 @@
 #       MS Visual Studio Visual C++ compiler
 #
 #       Visual Studio Compilers Tested:
-#            - Microsoft Visual Studio 2017 Community Edition v 15.9.44
-#            - Microsoft Visual Studio 2019 Community Edition v 16.11.10
-#            - Microsoft Visual Studio 2022 Community Edition v 17.1.0
+#            - Microsoft Visual Studio 2017 Community Edition v 15.9.50
+#            - Microsoft Visual Studio 2019 Community Edition v 16.11.18
+#            - Microsoft Visual Studio 2022 Community Edition v 17.3.1
 #
 #==============================================================================
 #   This is used for building two distinct executables of NetHack:
@@ -435,8 +435,8 @@ HACKCSRC = allmain.c alloc.c apply.c artifact.c attrib.c ball.c bones.c \
 	   rip.c rnd.c role.c rumors.c save.c sfstruct.c \
 	   shk.c shknam.c sit.c sounds.c \
 	   sp_lev.c spell.c steal.c steed.c symbols.c sys.c teleport.c \
-	   timeout.c topten.c track.c trap.c u_init.c \
-	   uhitm.c vault.c version.c vision.c weapon.c were.c wield.c \
+	   timeout.c topten.c track.c trap.c u_init.c uhitm.c utf8map.c \
+	   vault.c version.c vision.c weapon.c were.c wield.c \
 	   windows.c wizard.c worm.c worn.c write.c zap.c
 
 
@@ -496,10 +496,10 @@ VOBJ21 = $(O)sfstruct.o $(O)shk.o      $(O)shknam.o   $(O)sit.o
 VOBJ22 = $(O)sounds.o   $(O)sp_lev.o   $(O)spell.o    $(O)steal.o
 VOBJ23 = $(O)steed.o    $(O)symbols.o  $(O)sys.o      $(O)teleport.o
 VOBJ24 = $(O)timeout.o  $(O)topten.o   $(O)track.o    $(O)trap.o
-VOBJ25 = $(O)u_init.o   $(O)uhitm.o    $(O)vault.o    $(O)vision.o
-VOBJ26 = $(O)weapon.o   $(O)were.o     $(O)wield.o    $(O)windows.o
-VOBJ27 = $(O)wizard.o   $(O)worm.o     $(O)worn.o     $(O)write.o
-VOBJ28 = $(O)zap.o
+VOBJ25 = $(O)u_init.o   $(O)uhitm.o    $(O)utf8map.o  $(O)vault.o
+VOBJ26 = $(O)vision.o   $(O)weapon.o   $(O)were.o     $(O)wield.o
+VOBJ27 = $(O)windows.o  $(O)wizard.o   $(O)worm.o     $(O)worn.o
+VOBJ28 = $(O)write.o    $(O)zap.o
 
 LUAOBJ = $(O)nhlua.o    $(O)nhlsel.o    $(O)nhlobj.o
 
@@ -510,7 +510,7 @@ DLBOBJ = $(O)dlb.o
 
 REGEX  = $(O)cppregex.o
 
-TTYOBJ = $(O)topl.o     $(O)getline.o  $(O)wintty.o
+TTYOBJ = $(O)topl.o $(O)getline.o  $(O)wintty.o
 
 MDLIB = $(O)mdlib.o
 
@@ -629,9 +629,20 @@ rc=Rc.exe
 # is too old or untested.
 #
 # Recently tested versions:
-#NMAKE version 1416270450 from latest VS 2017 (Feb 8, 2022 version 15.9.44)
-#NMAKE version 1429301390 from latest VS 2019 (Feb 8, 2022 version 16.11.10)
-#NMAKE version 1431311040 from latest VS 2022 (Feb 15, 2022 version 17.1.0)
+TESTEDVS2017 = 14.16.27048.0
+TESTEDVS2019 = 14.29.30146.0
+TESTEDVS2022 = 14.33.31629.0
+
+VS2017CUR = $(TESTEDVS2017:.=)
+VS2019CUR = $(TESTEDVS2019:.=)
+VS2022CUR = $(TESTEDVS2022:.=)
+VS2017UP1 = $(VS2017CUR) + 1
+VS2019UP1 = $(VS2019CUR) + 1
+VS2022UP1 = $(VS2022CUR) + 1
+VS20171ST = 1411000000
+VS20191ST = $(VS2017UP1)
+VS20221ST = $(VS2019UP1)
+
 #!MESSAGE $(MAKEFLAGS)
 #!MESSAGE $(MAKEDIR)
 #!MESSAGE $(MAKE)
@@ -653,13 +664,13 @@ VSVER=2012
 VSVER=2013
 !ELSEIF ($(MAKEVERSION) > 1400000000) && ($(MAKEVERSION) < 1411000000)
 VSVER=2015
-!ELSEIF ($(MAKEVERSION) > 1411000000) && ($(MAKEVERSION) < 1416270451)
+!ELSEIF ($(MAKEVERSION) > $(VS20171ST)) && ($(MAKEVERSION) < $(VS2017UP1))
 VSVER=2017
-!ELSEIF ($(MAKEVERSION) > 1416270450) && ($(MAKEVERSION) < 1429301391)
+!ELSEIF ($(MAKEVERSION) > $(VS20191ST)) && ($(MAKEVERSION) < $(VS2019UP1))
 VSVER=2019
-!ELSEIF ($(MAKEVERSION) > 1429301390) && ($(MAKEVERSION) < 1431311041)
+!ELSEIF ($(MAKEVERSION) > $(VS20221ST)) && ($(MAKEVERSION) < $(VS2022UP1))
 VSVER=2022
-!ELSEIF ($(MAKEVERSION) > 1431311040)
+!ELSEIF ($(MAKEVERSION) > $(VS2022CUR))
 VSVER=2999              #untested future version
 !ENDIF
 
@@ -694,6 +705,12 @@ CL_RECENT=-sdl
 ! ENDIF
 !ENDIF
 
+!IF ($(VSVER) >= 2019)
+ASAN=/fsanitize=address
+!ELSE
+ASAN=
+!ENDIF
+
 #==========================================
 # More compiler setup post-macros
 #==========================================
@@ -712,7 +729,7 @@ ccommon= -c -nologo -D"_CONSOLE" -D"_CRT_NONSTDC_NO_DEPRECATE" -D"_CRT_SECURE_NO
 	-DHAS_STDINT_H -DHAS_INLINE $(CURSESDEF) $(RUNTIMEOPTDEF) \
 	-EHsc -fp:precise -Gd -GF -GS -Gy \
 	$(CL_RECENT) -WX- -Zc:forScope -Zc:wchar_t -Zi
-cdebug= -analyze- -D"_DEBUG" -MTd -RTC1 -Od
+cdebug= -analyze- -D"_DEBUG" -MTd -RTC1 -Od $(ASAN)
 crelease= -analyze- -D"_MBCS" -errorReport:prompt -MT -O2 -Ot -Ox -Oy
 
 lcommon= /NOLOGO /INCREMENTAL:NO
@@ -901,17 +918,17 @@ DLB =
 	@$(cc) /wd4244 $(PDCINCL) $(cflagsBuild) $(CROSSCOMPILE) $(CROSSCOMPILE_TARGET) -Fo$@ $<
 
 {$(PDCSRC)}.c{$(OBJ)}.o:
-	@$(cc) /wd4244 $(PDCINCL) $(cflagsBuild) $(CROSSCOMPILE) $(CROSSCOMPILE_TARGET) -Fo$@ $<
+	@$(cc) /wd4244 /wd4267 $(PDCINCL) $(cflagsBuild) $(CROSSCOMPILE) $(CROSSCOMPILE_TARGET) -Fo$@ $<
 
 {$(PDCWINCON)}.c{$(OBJ)}.o:
-	@$(cc) /wd4244 $(PDCINCL) $(cflagsBuild) $(CROSSCOMPILE) $(CROSSCOMPILE_TARGET) -Fo$@ $<
+	@$(cc) /wd4244 /wd4267 $(PDCINCL) $(cflagsBuild) $(CROSSCOMPILE) $(CROSSCOMPILE_TARGET) -Fo$@ $<
 
 #==========================================
 # Rules for LUA files
 #==========================================
 
 {$(LUASRC)}.c{$(OBJ)}.o:
-	@$(cc) $(cflagsBuild) -wd4701 -wd4702 -wd4774 $(CROSSCOMPILE) $(CROSSCOMPILE_TARGET) -Fo$@ $<
+	@$(cc) $(cflagsBuild) -wd4701 -wd4702 -wd4774 -wd4324 $(CROSSCOMPILE) $(CROSSCOMPILE_TARGET) -Fo$@ $<
 
 #==========================================
 #=============== TARGETS ==================
@@ -1113,7 +1130,7 @@ $(O)utility.tag: $(INCL)\nhlua.h $(U)tile2bmp.exe $(U)makedefs.exe
 	     @echo utilities made.
 
 $(INCL)\nhlua.h:
-	@echo  /* nhlua.h - generated by Makefile from Makefile.msc */ > $@
+	@echo  /* nhlua.h - generated by Makefile from Makefile.nmake */ > $@
 	@echo #include "lua.h" >> $@
 	@echo LUA_API int   (lua_error) (lua_State *L) NORETURN; >> $@
 	@echo #include "lualib.h" >> $@
@@ -1828,6 +1845,8 @@ clean:
 #   * commented out $(TARGETPFX)tile.o: tile.c $(HACK_H)
 #   * commented out the lines starting with
 #	$(TARGET_CC) so the rules in this Makefile will be used instead
+#   * add compile recipe for nhlua.c to add -wd4324 to suppress a
+#     warning during x64 build related to padding due to alignment
 # but otherwise untouched.
 # That means that there is some irrelevant stuff
 # in here, but maintenance should be easier.
@@ -2188,6 +2207,7 @@ $(TARGETPFX)mthrowu.o: mthrowu.c $(HACK_H)
 $(TARGETPFX)muse.o: muse.c $(HACK_H)
 $(TARGETPFX)music.o: music.c $(HACK_H)
 $(TARGETPFX)nhlua.o: nhlua.c $(HACK_H) $(INCL)\dlb.h
+	@$(cc) $(cflagsBuild) -wd4324 $(CROSSCOMPILE) $(CROSSCOMPILE_TARGET) -Fo$@ $(@B).c
 $(TARGETPFX)nhlsel.o: nhlsel.c $(HACK_H) $(INCL)\sp_lev.h
 $(TARGETPFX)nhlobj.o: nhlobj.c $(HACK_H) $(INCL)\sp_lev.h
 $(TARGETPFX)o_init.o: o_init.c $(HACK_H)
@@ -2235,6 +2255,7 @@ $(TARGETPFX)track.o: track.c $(HACK_H)
 $(TARGETPFX)trap.o: trap.c $(HACK_H)
 $(TARGETPFX)u_init.o: u_init.c $(HACK_H)
 $(TARGETPFX)uhitm.o: uhitm.c $(HACK_H)
+$(TARGETPFX)utf8map.o: utf8map.c $(HACK_H)
 $(TARGETPFX)vault.o: vault.c $(HACK_H)
 $(TARGETPFX)version.o: version.c $(HACK_H) $(INCL)\dlb.h
 $(TARGETPFX)vision.o: vision.c $(HACK_H)

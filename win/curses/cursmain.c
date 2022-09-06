@@ -7,6 +7,9 @@
 #include "hack.h"
 #include "color.h"
 #include "wincurs.h"
+#ifdef CURSES_UNICODE
+#include <locale.h>
+#endif
 
 /* define this if not linking with <foo>tty.o|.obj for some reason */
 #ifdef CURSES_DEFINE_ERASE_CHAR
@@ -33,7 +36,7 @@ static char *dummy_get_color_string(void);
 
 /* Interface definition, for windows.c */
 struct window_procs curses_procs = {
-    "curses",
+    WPID(curses),
     (WC_ALIGN_MESSAGE | WC_ALIGN_STATUS | WC_COLOR | WC_INVERSE
      | WC_HILITE_PET
 #ifdef NCURSES_MOUSE_VERSION /* (this macro name works for PDCURSES too) */
@@ -41,6 +44,9 @@ struct window_procs curses_procs = {
 #endif
      | WC_PERM_INVENT | WC_POPUP_DIALOG | WC_SPLASH_SCREEN),
     (WC2_DARKGRAY | WC2_HITPOINTBAR
+#ifdef CURSES_UNICODE
+     | WC2_U_UTF8STR
+#endif
 #ifdef SELECTSAVED
      | WC2_SELECTSAVED
 #endif
@@ -71,7 +77,6 @@ struct window_procs curses_procs = {
     curses_end_menu,
     curses_select_menu,
     genl_message_menu,
-    curses_update_inventory,
     curses_mark_synch,
     curses_wait_synch,
 #ifdef CLIPPING
@@ -111,6 +116,8 @@ struct window_procs curses_procs = {
     genl_status_enablefield,
     curses_status_update,
     genl_can_suspend_yes,
+    curses_update_inventory,
+    curses_ctrl_nhwindow,
 };
 
 /*
@@ -148,6 +155,10 @@ curses_init_nhwindows(int *argcp UNUSED,
 {
 #ifdef PDCURSES
     char window_title[BUFSZ];
+#endif
+
+#ifdef CURSES_UNICODE
+    setlocale(LC_CTYPE, "");
 #endif
 
 #ifdef XCURSES
@@ -409,7 +420,7 @@ curses_display_nhwindow(winid wid, boolean block)
 
     if (curses_is_menu(wid) || curses_is_text(wid)) {
         curses_end_menu(wid, "");
-        curses_select_menu(wid, PICK_NONE, &selected);
+        (void) curses_select_menu(wid, PICK_NONE, &selected);
         return;
     }
 
@@ -546,7 +557,8 @@ curses_start_menu(winid wid, unsigned long mbehavior)
 add_menu(winid wid, const glyph_info *glyphinfo,
                                 const anything identifier,
                                 char accelerator, char groupacc,
-                                int attr, char *str, unsigned int itemflags)
+                                int attr, int color,
+                                char *str, unsigned int itemflags)
                 -- Add a text line str to the given menu window.  If identifier
                    is 0, then the line cannot be selected (e.g. a title).
                    Otherwise, identifier is the value returned if the line is
@@ -579,7 +591,7 @@ void
 curses_add_menu(winid wid, const glyph_info *glyphinfo,
                 const ANY_P *identifier,
                 char accelerator, char group_accel, int attr,
-                const char *str, unsigned itemflags)
+                int clr UNUSED, const char *str, unsigned itemflags)
 {
     int curses_attr;
 
@@ -670,17 +682,35 @@ curses_update_inventory(int arg)
         return;
 
     if (!arg) {
+         /* if perm_invent is just being toggled on, we need to run the
+            update twice; the first time creates the window and organizes
+            the screen to fit it in, the second time populates it;
+            needed if we're called from docrt() because the "organizes
+            the screen" part calls docrt() and that skips recursive calls */
+         boolean no_inv_win_yet = !curses_get_nhwin(INV_WIN);
+
         /* Update inventory sidebar.  NetHack uses normal menu functions
            when gathering the inventory, and we don't want to change the
            underlying code.  So instead, track if an inventory update is
            being performed with a static variable. */
         inv_update = 1;
         curs_update_invt(0);
+        if (no_inv_win_yet)
+            curs_update_invt(0);
         inv_update = 0;
     } else {
         /* perform scrolling operations on persistent inventory window */
         curs_update_invt(arg);
     }
+}
+
+win_request_info *
+curses_ctrl_nhwindow(
+    winid window UNUSED,
+    int request UNUSED,
+    win_request_info *wri UNUSED)
+{
+    return (win_request_info *) 0;
 }
 
 /*
@@ -730,26 +760,29 @@ print_glyph(window, x, y, glyphinfo, bkglyphinfo)
                    a 1-1 map between glyphs and distinct things on the map).
                    bkglyphinfo is to render the background behind the glyph.
                    It's not used here.
-               -- bkglyphinfo contains a background glyph for potential use
-                   by some graphical or tiled environments to allow the depiction
-                   to fall against a background consistent with the grid 
-                   around x,y. If bkglyphinfo->glyph is NO_GLYPH, then the
-                   parameter should be ignored (do nothing with it).
+                -- bkglyphinfo contains a background glyph for potential use
+                   by some graphical or tiled environments to allow the
+                   depiction to fall against a background consistent with
+                   the grid around x,y. If bkglyphinfo->glyph is NO_GLYPH,
+                   then the parameter should be ignored (do nothing with it).
                 -- glyph_info struct fields:
-                    int glyph;            the display entity
-                    int color;            color for window ports not using a tile
-                    int ttychar;          the character mapping for the original tty
-                                          interface. Most or all window ports wanted
-                                          and used this for various things so it is
-                                          provided in 3.7+
+                    int glyph;    the display entity
+                    int color;    color for window ports not using a tile
+                    int ttychar;  the character mapping for the original tty
+                                  interface. Most or all window ports wanted
+                                  and used this for various things so it is
+                                  provided in 3.7+
                     short int symidx;     offset into syms array
                     unsigned glyphflags;  more detail about the entity
 
 */
 
 void
-curses_print_glyph(winid wid, xchar x, xchar y,
-                   const glyph_info *glyphinfo, const glyph_info *bkglyphinfo UNUSED)
+curses_print_glyph(
+    winid wid,
+    coordxy x, coordxy y,
+    const glyph_info *glyphinfo,
+    const glyph_info *bkglyphinfo UNUSED)
 {
     int glyph;
     int ch;
@@ -760,7 +793,7 @@ curses_print_glyph(winid wid, xchar x, xchar y,
     glyph = glyphinfo->glyph;
     special = glyphinfo->gm.glyphflags;
     ch = glyphinfo->ttychar;
-    color = glyphinfo->gm.color;
+    color = glyphinfo->gm.sym.color;
     if ((special & MG_PET) && iflags.hilite_pet) {
         attr = iflags.wc2_petattr;
     }
@@ -785,11 +818,26 @@ curses_print_glyph(winid wid, xchar x, xchar y,
         /* water and lava look the same except for color; when color is off,
            render lava in inverse video so that they look different */
         if ((special & (MG_BW_LAVA | MG_BW_ICE)) != 0 && iflags.use_inverse) {
-            attr = A_REVERSE; /* map_glyphinfo() only sets this if color is off */
+            /* reset_glyphmap() only sets MG_BW_foo if color is off */
+            attr = A_REVERSE;
+        }
+        /* highlight female monsters (wizard mode option) */
+        if ((special & MG_FEMALE) && wizard && iflags.wizmgender) {
+            attr = A_REVERSE;
         }
     }
 
+#ifdef ENHANCED_SYMBOLS
+    if (SYMHANDLING(H_UTF8)
+        && glyphinfo->gm.u
+        && glyphinfo->gm.u->utf8str) {
+        curses_putch(wid, x, y, ch, glyphinfo->gm.u, color, attr);
+    } else {
+        curses_putch(wid, x, y, ch, NULL, color, attr);
+    }
+#else
     curses_putch(wid, x, y, ch, color, attr);
+#endif
 }
 
 /*
@@ -848,7 +896,7 @@ curses_nhgetch(void)
 }
 
 /*
-int nh_poskey(int *x, int *y, int *mod)
+int nh_poskey(coordxy *x, coordxy *y, int *mod)
                 -- Returns a single character input from the user or a
                    a positioning event (perhaps from a mouse).  If the
                    return value is non-zero, a character was typed, else,
@@ -863,7 +911,7 @@ int nh_poskey(int *x, int *y, int *mod)
                    routine always returns a non-zero character.
 */
 int
-curses_nh_poskey(int *x, int *y, int *mod)
+curses_nh_poskey(coordxy *x, coordxy *y, int *mod)
 {
     int key = curses_nhgetch();
 
@@ -975,10 +1023,14 @@ delay_output()  -- Causes a visible delay of 50ms in the output.
 void
 curses_delay_output(void)
 {
-    /* refreshing the whole display is a waste of time,
-     * but that's why we're here */
-    refresh();
-    napms(50);
+#ifdef TIMED_DELAY
+    if (flags.nap) {
+        /* refreshing the whole display is a waste of time,
+         * but that's why we're here */
+        refresh();
+        napms(50);
+    }
+#endif
 }
 
 /*
@@ -1060,7 +1112,7 @@ curs_reset_windows(boolean redo_main, boolean redo_status)
     }
     if (need_redraw) {
         curses_last_messages();
-        doredraw();
+        docrt();
     }
 }
 

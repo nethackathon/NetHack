@@ -1,5 +1,5 @@
 #	NetHack Makefile.
-# NetHack 3.7  Makefile.src    $NHDT-Date: 1626967328 2021/07/22 15:22:08 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.128 $
+# NetHack 3.7  Makefile.src    $NHDT-Date: 1654287121 2022/06/03 20:12:01 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.145 $
 # Copyright (c) 2018 by Pasi Kallinen
 # NetHack may be freely redistributed.  See license for details.
 
@@ -465,7 +465,10 @@ PACKAGE=@true
 MAKEDEFS = ../util/makedefs
 
 # -lm required by lua
-LUALIB = ../lib/lua/liblua.a -lm $(DLLIB)
+LUA_VERSION ?=5.4.4
+LUABASE = liblua-$(LUA_VERSION).a
+LUALIB = ../lib/lua/$(LUABASE)
+LUALIBS = $(LUALIB) -lm $(DLLIB)
 
 # timestamp files to reduce `make' overhead and shorten .o dependency lists
 CONFIG_H = ../src/config.h-t
@@ -488,7 +491,7 @@ HACKCSRC = allmain.c alloc.c apply.c artifact.c attrib.c ball.c bones.c \
 	   rip.c rnd.c role.c rumors.c save.c sfstruct.c \
 	   shk.c shknam.c sit.c sounds.c \
 	   sp_lev.c spell.c steal.c steed.c symbols.c sys.c teleport.c \
-	   timeout.c topten.c track.c trap.c u_init.c \
+	   timeout.c topten.c track.c trap.c u_init.c utf8map.c \
 	   uhitm.c vault.c version.c vision.c weapon.c were.c wield.c \
 	   windows.c wizard.c worm.c worn.c write.c zap.c
 
@@ -580,8 +583,8 @@ HOBJ = $(TARGETPFX)allmain.o $(TARGETPFX)alloc.o \
 	$(TARGETPFX)symbols.o $(TARGETPFX)sys.o $(TARGETPFX)steal.o \
 	$(TARGETPFX)steed.o $(TARGETPFX)teleport.o $(TARGETPFX)timeout.o \
 	$(TARGETPFX)topten.o $(TARGETPFX)track.o $(TARGETPFX)trap.o \
-	$(TARGETPFX)u_init.o $(TARGETPFX)uhitm.o $(TARGETPFX)vault.o \
-	$(TARGETPFX)vision.o $(TARGETPFX)weapon.o \
+	$(TARGETPFX)u_init.o $(TARGETPFX)uhitm.o $(TARGETPFX)utf8map.o \
+	$(TARGETPFX)vault.o $(TARGETPFX)vision.o $(TARGETPFX)weapon.o \
 	$(TARGETPFX)were.o $(TARGETPFX)wield.o $(TARGETPFX)windows.o \
 	$(TARGETPFX)wizard.o $(TARGETPFX)worm.o $(TARGETPFX)worn.o \
 	$(TARGETPFX)write.o $(TARGETPFX)zap.o \
@@ -599,43 +602,43 @@ all:	$(GAME)
 pregame:
 	$(PREGAME)
 
-$(GAME):	pregame $(MAKEDEFS) $(SYSTEM)
+$(GAME):	pregame $(MAKEDEFS) $(LUALIB) $(SYSTEM)
 	@echo "$(GAME) is up to date."
 
 Sysunix:	$(HOSTOBJ) $(HOBJ) $(DATE_O) $(BUILDMORE) Makefile
 	@echo "Linking $(GAME)."
 	$(AT)$(TARGET_LINK) $(TARGET_LFLAGS) -o $(GAMEBIN) \
-		$(HOBJ) $(DATE_O) $(WINLIB) $(TARGET_LIBS) $(LUALIB)
+		$(HOBJ) $(DATE_O) $(WINLIB) $(TARGET_LIBS) $(LUALIBS)
 	@touch Sysunix
 
 Sys3B2:	$(HOSTOBJ) $(HOBJ) $(DATE_O) $(BUILDMORE) Makefile
 	@echo "Linking $(GAME)."
 	$(AT)$(TARGET_LINK) $(TARGET_LFLAGS) -o $(GAMEBIN) \
-		$(HOBJ) $(DATE_O) $(WINLIB) $(LUALIB) -lmalloc
+		$(HOBJ) $(DATE_O) $(WINLIB) $(LUALIBS) -lmalloc
 	@touch Sys3B2
 
 Sysatt:	$(HOSTOBJ) $(HOBJ) $(DATE_O) $(BUILDMORE) Makefile
 	@echo "Loading $(GAME)."
 	$(AT)$(LD) $(TARGET_LFLAGS) /lib/crt0s.o /lib/shlib.ifile \
-		-o $(GAMEBIN) $(HOSTOBJ) $(HOBJ) $(DATE_O) $(LUALIB)
+		-o $(GAMEBIN) $(HOSTOBJ) $(HOBJ) $(DATE_O) $(LUALIBS)
 	@touch Sysatt
 
 Systos:	$(HOSTOBJ) $(HOBJ) $(DATE_O) $(BUILDMORE) Makefile
 	@echo "Linking $(GAME)."
 	$(AT)$(TARGET_LINK) $(TARGET_LFLAGS) -o $(GAMEBIN) \
-		$(HOBJ) $(DATE_O) $(WINLIB) $(LUALIB)
+		$(HOBJ) $(DATE_O) $(WINLIB) $(LUALIBS)
 	@touch Systos
 
 SysV-AT:	DUMB.Setup $(HOSTOBJ) $(HOBJ) $(DATE_O) $(BUILDMORE) Makefile
 	@echo "Linking $(GAME)."
 	$(AT)$(TARGET_LINK) $(TARGET_LFLAGS) -o $(GAMEBIN) \
-		$(HOBJ) $(DATE_O) $(WINLIB) $(LUALIB)
+		$(HOBJ) $(DATE_O) $(WINLIB) $(LUALIBS)
 	@touch SysV-AT
 
 SysBe: $(HOSTOBJ) $(HOBJ) $(DATE_O) $(BUILDMORE) Makefile
 	@echo "Linking $(GAME)."
 	$(AT)$(TARGET_LINK) $(TARGET_LFLAGS) -o $(GAME) \
-		$(HOBJ) $(DATE_O) $(WINLIB) $(TARGET_LIBS) $(LUALIB)
+		$(HOBJ) $(DATE_O) $(WINLIB) $(TARGET_LIBS) $(LUALIBS)
 	@xres -o $(GAME) ../win/BeOS/nethack.rsrc
 	@mimeset -f $(GAME)
 	@touch SysBe
@@ -660,7 +663,7 @@ DUMB.Setup:	../include/extern.h
 	cp ../include/extern.DUMB ../include/extern.h
 	@touch DUMB.Setup
 
-../lib/lua/liblua.a ../include/nhlua.h:
+$(LUALIB) ../include/nhlua.h:
 	@( cd .. ; $(MAKE) lua_support )
 
 #	dependencies for makedefs and its outputs, which the util
@@ -784,28 +787,28 @@ depend: ../sys/unix/depend.awk \
 
 # config.h timestamp
 $(CONFIG_H): ../include/config.h ../include/config1.h ../include/patchlevel.h \
-		../include/tradstdc.h ../include/global.h ../include/coord.h \
-		../include/vmsconf.h ../include/system.h ../include/nhlua.h \
-		../include/unixconf.h ../include/pcconf.h ../include/micro.h \
-		../include/windconf.h ../include/warnings.h \
-		../include/fnamesiz.h
+		../include/tradstdc.h ../include/integer.h \
+		../include/global.h ../include/coord.h ../include/vmsconf.h \
+		../include/system.h ../include/nhlua.h ../include/unixconf.h \
+		../include/pcconf.h ../include/micro.h ../include/windconf.h \
+		../include/warnings.h ../include/fnamesiz.h
 	touch $(CONFIG_H)
 # hack.h timestamp
 $(HACK_H): ../include/hack.h $(CONFIG_H) ../include/lint.h ../include/align.h \
-		../include/dungeon.h ../include/sym.h ../include/defsym.h \
-		../include/mkroom.h ../include/artilist.h \
+		../include/dungeon.h ../include/wintype.h ../include/sym.h \
+		../include/defsym.h ../include/mkroom.h ../include/artilist.h \
 		../include/objclass.h ../include/objects.h \
 		../include/youprop.h ../include/prop.h ../include/permonst.h \
 		../include/monattk.h ../include/monflag.h \
 		../include/monsters.h ../include/mondata.h \
-		../include/wintype.h ../include/context.h ../include/rm.h \
-		../include/botl.h ../include/rect.h ../include/region.h \
+		../include/context.h ../include/rm.h ../include/botl.h \
+		../include/rect.h ../include/region.h ../include/trap.h \
 		../include/display.h ../include/vision.h ../include/color.h \
 		../include/decl.h ../include/quest.h ../include/spell.h \
 		../include/obj.h ../include/engrave.h ../include/you.h \
 		../include/attrib.h ../include/monst.h ../include/mextra.h \
-		../include/skills.h ../include/timeout.h ../include/trap.h \
-		../include/flag.h ../include/winprocs.h ../include/sys.h
+		../include/skills.h ../include/timeout.h ../include/flag.h \
+		../include/winprocs.h ../include/sys.h
 	touch $(HACK_H)
 #
 $(TARGETPFX)pcmain.o: ../sys/share/pcmain.c $(HACK_H) ../include/dlb.h
@@ -902,7 +905,7 @@ $(TARGETPFX)winval.o: ../win/X11/winval.c $(HACK_H) ../include/winX.h
 $(TARGETPFX)tile.o: tile.c $(HACK_H)
 $(TARGETPFX)winshim.o: ../win/shim/winshim.c $(HACK_H)
 	$(TARGET_CC) $(TARGET_CFLAGS) -c -o $@ ../win/shim/winshim.c
-$(TARGETPFX)cppregex.o: ../sys/share/cppregex.cpp
+$(TARGETPFX)cppregex.o: ../sys/share/cppregex.cpp $(CONFIG_H)
 	$(TARGET_CXX) $(TARGET_CXXFLAGS) -c -o $@ ../sys/share/cppregex.cpp
 $(TARGETPFX)qt_bind.o: ../win/Qt/qt_bind.cpp $(HACK_H) ../win/Qt/qt_pre.h \
 		../win/Qt/qt_post.h ../win/Qt/qt_bind.h ../win/Qt/qt_main.h \
@@ -1078,7 +1081,7 @@ $(TARGETPFX)dokick.o: dokick.c $(HACK_H)
 $(TARGETPFX)dothrow.o: dothrow.c $(HACK_H)
 $(TARGETPFX)drawing.o: drawing.c $(CONFIG_H) ../include/color.h \
 		../include/rm.h ../include/objclass.h ../include/defsym.h \
-		../include/objects.h ../include/sym.h
+		../include/objects.h ../include/wintype.h ../include/sym.h
 $(TARGETPFX)dungeon.o: dungeon.c $(HACK_H) ../include/dgn_file.h \
 		../include/dlb.h
 $(TARGETPFX)eat.o: eat.c $(HACK_H)
@@ -1103,11 +1106,12 @@ $(TARGETPFX)mcastu.o: mcastu.c $(HACK_H)
 $(TARGETPFX)mdlib.o: mdlib.c $(CONFIG_H) ../include/permonst.h \
 		../include/align.h ../include/monattk.h ../include/monflag.h \
 		../include/monsters.h ../include/objclass.h \
-		../include/defsym.h ../include/objects.h ../include/sym.h \
-		../include/artilist.h ../include/dungeon.h ../include/obj.h \
-		../include/monst.h ../include/mextra.h ../include/you.h \
-		../include/attrib.h ../include/prop.h ../include/skills.h \
-		../include/context.h ../include/flag.h ../include/dlb.h
+		../include/defsym.h ../include/objects.h ../include/wintype.h \
+		../include/sym.h ../include/artilist.h ../include/dungeon.h \
+		../include/obj.h ../include/monst.h ../include/mextra.h \
+		../include/you.h ../include/attrib.h ../include/prop.h \
+		../include/skills.h ../include/context.h ../include/flag.h \
+		../include/dlb.h
 $(TARGETPFX)mhitm.o: mhitm.c $(HACK_H) ../include/artifact.h
 $(TARGETPFX)mhitu.o: mhitu.c $(HACK_H) ../include/artifact.h
 $(TARGETPFX)minion.o: minion.c $(HACK_H)
@@ -1122,8 +1126,8 @@ $(TARGETPFX)monmove.o: monmove.c $(HACK_H) ../include/mfndpos.h \
 		../include/artifact.h
 $(TARGETPFX)monst.o: monst.c $(CONFIG_H) ../include/permonst.h \
 		../include/align.h ../include/monattk.h ../include/monflag.h \
-		../include/monsters.h ../include/sym.h ../include/defsym.h \
-		../include/color.h
+		../include/monsters.h ../include/wintype.h ../include/sym.h \
+		../include/defsym.h ../include/color.h
 $(TARGETPFX)mplayer.o: mplayer.c $(HACK_H)
 $(TARGETPFX)mthrowu.o: mthrowu.c $(HACK_H)
 $(TARGETPFX)muse.o: muse.c $(HACK_H)
@@ -1175,6 +1179,7 @@ $(TARGETPFX)topten.o: topten.c $(HACK_H) ../include/dlb.h
 $(TARGETPFX)track.o: track.c $(HACK_H)
 $(TARGETPFX)trap.o: trap.c $(HACK_H)
 $(TARGETPFX)u_init.o: u_init.c $(HACK_H)
+$(TARGETPFX)utf8map.o: utf8map.c $(HACK_H)
 $(TARGETPFX)uhitm.o: uhitm.c $(HACK_H)
 $(TARGETPFX)vault.o: vault.c $(HACK_H)
 $(TARGETPFX)version.o: version.c $(HACK_H) ../include/dlb.h

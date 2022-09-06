@@ -12,15 +12,15 @@ extern "C" {
 #include <QtGui/QtGui>
 #include <QtCore/QStringList>
 #if QT_VERSION < 0x050000
-#include <QtGui/QSound>
+#include <QtGui/QSoundEffect>
 #elif QT_VERSION < 0x060000
 #include <QtWidgets/QtWidgets>
-#include <QtMultimedia/QSound>
+#include <QtMultimedia/QSoundEffect>
 #else
+/* Qt6 or above */
 #include <QtWidgets/QtWidgets>
-#undef QT_NO_SOUND
-#define QT_NO_SOUND 1
-#endif
+#include <QSoundEffect>
+#endif  /* QT_VERSION */
 #include "qt_post.h"
 #include "qt_bind.h"
 #include "qt_click.h"
@@ -88,7 +88,7 @@ NetHackQtBind::NetHackQtBind(int& argc, char** argv) :
     QCoreApplication::setApplicationName("NetHack-Qt"); // Qt NetHack
     {
         char cvers[BUFSZ];
-        QString qvers = QString(::version_string(cvers));
+        QString qvers = QString(::version_string(cvers, sizeof cvers));
         QCoreApplication::setApplicationVersion(qvers);
     }
 #ifdef MACOS
@@ -139,7 +139,12 @@ NetHackQtBind::qt_Splash()
         if (qt_compact_mode) {
             splash->showMaximized();
         } else {
+#if __cplusplus >= 202002L
+            splash->setFrameStyle(static_cast<int>(QFrame::WinPanel)
+                                     | static_cast<int>(QFrame::Raised));
+#else
             splash->setFrameStyle(QFrame::WinPanel | QFrame::Raised);
+#endif
             splash->setLineWidth(10);
             splash->adjustSize();
             splash->show();
@@ -453,7 +458,7 @@ void NetHackQtBind::qt_start_menu(winid wid, unsigned long mbehavior UNUSED)
 }
 
 void NetHackQtBind::qt_add_menu(winid wid, const glyph_info *glyphinfo,
-    const ANY_P * identifier, char ch, char gch, int attr,
+    const ANY_P * identifier, char ch, char gch, int attr, int clr UNUSED,
     const char *str, unsigned itemflags)
 {
     NetHackQtWindow* window=id_to_window[(int)wid];
@@ -485,6 +490,15 @@ void NetHackQtBind::qt_update_inventory(int arg UNUSED)
     */
 }
 
+win_request_info *NetHackQtBind::qt_ctrl_nhwindow(
+    winid wid UNUSED,
+    int request UNUSED,
+    win_request_info *wri UNUSED)
+{
+    NetHackQtWindow* window UNUSED =id_to_window[(int)wid];
+    return (win_request_info *) 0;
+}
+
 void NetHackQtBind::qt_mark_synch()
 {
 }
@@ -506,7 +520,7 @@ void NetHackQtBind::qt_cliparound_window(winid wid, int x, int y)
 }
 
 void NetHackQtBind::qt_print_glyph(
-    winid wid, xchar x, xchar y,
+    winid wid, coordxy x, coordxy y,
     const glyph_info *glyphinfo,
     const glyph_info *bkglyphinfo UNUSED)
 {
@@ -517,7 +531,7 @@ void NetHackQtBind::qt_print_glyph(
 
 #if 0
 void NetHackQtBind::qt_print_glyph_compose(
-    winid wid, xchar x, xchar y, int glyph1, int glyph2)
+    winid wid, coordxy x, coordxy y, int glyph1, int glyph2)
 {
     NetHackQtWindow *window = id_to_window[(int) wid];
     window->PrintGlyphCompose(x, y, glyph1, glyph2);
@@ -570,7 +584,7 @@ QCoreApplication::exec: The event loop is already running
     return keybuffer.GetAscii();
 }
 
-int NetHackQtBind::qt_nh_poskey(int *x, int *y, int *mod)
+int NetHackQtBind::qt_nh_poskey(coordxy *x, coordxy *y, int *mod)
 {
     if (main)
 	main->fadeHighlighting(true);
@@ -841,6 +855,8 @@ int NetHackQtBind::qt_get_ext_cmd()
         result = xcmd->get();
         delete xcmd;
     } while (result == xcmdNoMatch);
+    // refresh message window after extended command dialog is dismissed
+    NetHackQtBind::qt_clear_nhwindow(WIN_MESSAGE);
     return result;
 }
 
@@ -1015,7 +1031,7 @@ static void Qt_positionbar(char *) {}
 } // namespace nethack_qt_
 
 struct window_procs Qt_procs = {
-    "Qt",
+    WPID(Qt),
     (WC_COLOR | WC_HILITE_PET
      | WC_ASCII_MAP | WC_TILED_MAP
      | WC_FONT_MAP | WC_TILE_FILE | WC_TILE_WIDTH | WC_TILE_HEIGHT
@@ -1046,7 +1062,6 @@ struct window_procs Qt_procs = {
     nethack_qt_::NetHackQtBind::qt_end_menu,
     nethack_qt_::NetHackQtBind::qt_select_menu,
     genl_message_menu,      /* no need for Qt-specific handling */
-    nethack_qt_::NetHackQtBind::qt_update_inventory,
     nethack_qt_::NetHackQtBind::qt_mark_synch,
     nethack_qt_::NetHackQtBind::qt_wait_synch,
 #ifdef CLIPPING
@@ -1093,19 +1108,31 @@ struct window_procs Qt_procs = {
     genl_status_update,
 #endif
     genl_can_suspend_yes,
+    nethack_qt_::NetHackQtBind::qt_update_inventory,
+    nethack_qt_::NetHackQtBind::qt_ctrl_nhwindow,
 };
 
 #ifndef WIN32
 extern "C" void play_usersound(const char *, int);
 
+QSoundEffect *effect = NULL;
+
 /* called from core, sounds.c */
 void
-play_usersound(const char *filename, int volume UNUSED)
+play_usersound(const char *filename, int volume)
 {
 #if defined(USER_SOUNDS) && !defined(QT_NO_SOUND)
-    QSound::play(filename);
+    if (!effect)
+        effect = new QSoundEffect(nethack_qt_::NetHackQtBind::mainWidget());
+    if (effect) {
+        effect->setLoopCount(1);
+        effect->setVolume((1.00f * volume) / 100.0f);
+        effect->setSource(QUrl::fromLocalFile(filename));
+        effect->play();
+    }
 #else
     nhUse(filename);
+    nhUse(volume);
 #endif
 }
 #endif /*!WIN32*/

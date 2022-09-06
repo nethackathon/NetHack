@@ -45,7 +45,7 @@ static boolean md_stop(coord *, coord *);
 static boolean md_rush(struct monst *, int, int);
 static void newmail(struct mail_info *);
 #if defined(SIMPLE_MAIL) || defined(SERVER_ADMIN_MSG)
-static void read_simplemail(char *mbox, boolean adminmsg);
+static void read_simplemail(const char *mbox, boolean adminmsg);
 #endif
 
 #if !defined(UNIX) && !defined(VMS)
@@ -200,7 +200,7 @@ md_start(coord *startp)
                     startp->y = row;
                     startp->x = g.viz_rmin[row];
 
-                } else if (enexto(&testcc, (xchar) g.viz_rmin[row], row,
+                } else if (enexto(&testcc, (coordxy) g.viz_rmin[row], row,
                                   (struct permonst *) 0)
                            && !cansee(testcc.x, testcc.y)
                            && couldsee(testcc.x, testcc.y)) {
@@ -215,7 +215,7 @@ md_start(coord *startp)
                     startp->y = row;
                     startp->x = g.viz_rmax[row];
 
-                } else if (enexto(&testcc, (xchar) g.viz_rmax[row], row,
+                } else if (enexto(&testcc, (coordxy) g.viz_rmax[row], row,
                                   (struct permonst *) 0)
                            && !cansee(testcc.x, testcc.y)
                            && couldsee(testcc.x, testcc.y)) {
@@ -247,7 +247,7 @@ static boolean
 md_stop(coord *stopp,  /* stopping position (we fill it in) */
         coord *startp) /* starting position (read only) */
 {
-    int x, y, distance, min_distance = -1;
+    coordxy x, y, distance, min_distance = -1;
 
     for (x = u.ux - 1; x <= u.ux + 1; x++)
         for (y = u.uy - 1; y <= u.uy + 1; y++) {
@@ -560,10 +560,8 @@ ckmailstatus(void)
 
 #if defined(SIMPLE_MAIL) || defined(SERVER_ADMIN_MSG)
 
-DISABLE_WARNING_FORMAT_NONLITERAL
-
 void
-read_simplemail(char *mbox, boolean adminmsg)
+read_simplemail(const char *mbox, boolean adminmsg)
 {
     FILE* mb = fopen(mbox, "r");
     char curline[128], *msg;
@@ -571,9 +569,6 @@ read_simplemail(char *mbox, boolean adminmsg)
 #ifdef SIMPLE_MAIL
     struct flock fl = { 0 };
 #endif
-    const char *msgfrom = adminmsg
-        ? "The voice of %s booms through the caverns:"
-        : "This message is from '%s'.";
 
     if (!mb)
         goto bail;
@@ -589,34 +584,47 @@ read_simplemail(char *mbox, boolean adminmsg)
     /* Allow this call to block. */
     if (!adminmsg
 #ifdef SIMPLE_MAIL
-        && fcntl (fileno (mb), F_SETLKW, &fl) == -1
+        && fcntl(fileno(mb), F_SETLKW, &fl) == -1
 #endif
         )
         goto bail;
 
     while (fgets(curline, 128, mb) != NULL) {
+        const char *endpunct;
+        int msglen;
+
         if (!adminmsg) {
 #ifdef SIMPLE_MAIL
             fl.l_type = F_UNLCK;
-            fcntl (fileno(mb), F_UNLCK, &fl);
+            fcntl(fileno(mb), F_UNLCK, &fl);
 #endif
             pline("There is a%s message on this scroll.",
                   seen_one_already ? "nother" : "");
         }
         msg = strchr(curline, ':');
 
-        if (!msg)
+        /* if incorrectly formatted, or message is empty (':' and '\n' take
+           up 2 chars, so must have at least 3 to be nonempty), give up */
+        if (!msg || (msglen = (int) strlen(msg)) < 3)
             goto bail;
 
         *msg = '\0';
-        msg++;
-        msg[strlen(msg) - 1] = '\0'; /* kill newline */
+        msg++, msglen--;
+        msg[msglen - 1] = '\0'; /* kill newline */
 
-        pline(msgfrom, curline);
-        if (adminmsg)
-            verbalize("%s", msg);
-        else
-            pline("It reads: \"%s\".", msg);
+        /* supply ending punctuation only if the message doesn't have any */
+        endpunct = "";
+        if (!index(".!?", msg[msglen - 2]))
+            endpunct = ".";
+
+        if (adminmsg) {
+            urgent_pline("The voice of %s booms through the caverns:",
+                         curline);
+        } else {
+            pline("This message is from '%s'.", curline);
+            pline("It reads:");
+        }
+        pline("\"%s\"%s", msg, endpunct);
 
         seen_one_already = TRUE;
 #ifdef SIMPLE_MAIL
@@ -646,8 +654,6 @@ read_simplemail(char *mbox, boolean adminmsg)
         pline("It appears to be all gibberish.");
 }
 
-RESTORE_WARNING_FORMAT_NONLITERAL
-
 #endif /* SIMPLE_MAIL */
 
 void
@@ -656,15 +662,13 @@ ck_server_admin_msg(void)
 #ifdef SERVER_ADMIN_MSG
     static struct stat ost,nst;
     static long lastchk = 0;
-    char adminbuf[BUFSZ];
 
     if (g.moves < lastchk + SERVER_ADMIN_MSG_CKFREQ) return;
     lastchk = g.moves;
 
     if (!stat(SERVER_ADMIN_MSG, &nst)) {
         if (nst.st_mtime > ost.st_mtime)
-            read_simplemail(nonconst(SERVER_ADMIN_MSG, adminbuf,
-				     sizeof adminbuf), TRUE);
+            read_simplemail(SERVER_ADMIN_MSG, TRUE);
         ost.st_mtime = nst.st_mtime;
     }
 #endif /* SERVER_ADMIN_MSG */

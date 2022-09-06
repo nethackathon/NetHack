@@ -1,4 +1,4 @@
-/* NetHack 3.7	uhitm.c	$NHDT-Date: 1646652773 2022/03/07 11:32:53 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.344 $ */
+/* NetHack 3.7	uhitm.c	$NHDT-Date: 1650963745 2022/04/26 09:02:25 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.348 $ */
 /* Copyright (c) Stichting Mathematisch Centrum, Amsterdam, 1985. */
 /*-Copyright (c) Robert Patrick Rankin, 2012. */
 /* NetHack may be freely redistributed.  See license for details. */
@@ -8,6 +8,7 @@
 static const char brief_feeling[] =
     "have a %s feeling for a moment, then it passes.";
 
+static boolean mhitm_mgc_atk_negated(struct monst *, struct monst *);
 static boolean known_hitum(struct monst *, struct obj *, int *, int, int,
                            struct attack *, int);
 static boolean theft_petrifies(struct obj *);
@@ -21,14 +22,26 @@ static boolean m_slips_free(struct monst *, struct attack *);
 static void start_engulf(struct monst *);
 static void end_engulf(void);
 static int gulpum(struct monst *, struct attack *);
+static boolean m_is_steadfast(struct monst *);
 static boolean hmonas(struct monst *);
 static void nohandglow(struct monst *);
-static boolean mhurtle_to_doom(struct monst *, int, struct permonst **,
-                               boolean);
-static void first_weapon_hit(void);
+static boolean mhurtle_to_doom(struct monst *, int, struct permonst **);
+static void first_weapon_hit(struct obj *);
 static boolean shade_aware(struct obj *);
 
 #define PROJECTILE(obj) ((obj) && is_ammo(obj))
+
+static boolean
+mhitm_mgc_atk_negated(struct monst *magr, struct monst *mdef)
+{
+    int armpro = magic_negation(mdef);
+    boolean negated = !(rn2(10) >= 3 * armpro);
+
+    /* since hero can't be cancelled, only defender's armor applies */
+    if (magr == &g.youmonst)
+        return negated;
+    return magr->mcan || negated;
+}
 
 /* multi_reason is usually a literal string; here we generate one that
    has the causing monster's type included */
@@ -240,7 +253,7 @@ attack_checks(
     if (flags.confirm && mtmp->mpeaceful
         && !Confusion && !Hallucination && !Stunned) {
         /* Intelligent chaotic weapons (Stormbringer) want blood */
-        if (wep && wep->oartifact == ART_STORMBRINGER) {
+        if (is_art(wep, ART_STORMBRINGER)) {
             g.override_confirmation = TRUE;
             return FALSE;
         }
@@ -396,7 +409,7 @@ do_attack(struct monst *mtmp)
      */
     /* Intelligent chaotic weapons (Stormbringer) want blood */
     if (is_safemon(mtmp) && !g.context.forcefight) {
-        if (!uwep || uwep->oartifact != ART_STORMBRINGER) {
+        if (!u_wield_art(ART_STORMBRINGER)) {
             /* There are some additional considerations: this won't work
              * if in a shop or Punished or you miss a random roll or
              * if you can walk thru walls and your pet cannot (KAA) or
@@ -470,7 +483,7 @@ do_attack(struct monst *mtmp)
 
     if (g.unweapon) {
         g.unweapon = FALSE;
-        if (flags.verbose) {
+        if (Verbose(4, do_attack)) {
             if (uwep)
                 You("begin bashing monsters with %s.", yname(uwep));
             else if (!cantwield(g.youmonst.data))
@@ -534,7 +547,7 @@ known_hitum(
     if (g.override_confirmation) {
         /* this may need to be generalized if weapons other than
            Stormbringer acquire similar anti-social behavior... */
-        if (flags.verbose)
+        if (Verbose(4, known_hitum))
             Your("bloodthirsty blade attacks!");
     }
 
@@ -638,14 +651,14 @@ hitum_cleave(
         dieroll = rnd(20);
         mhit = (tmp > dieroll);
         g.bhitpos.x = tx, g.bhitpos.y = ty; /* normally set up by
-					       do_attack() */
+                                               do_attack() */
         (void) known_hitum(mtmp, uwep, &mhit, tmp, armorpenalty,
                            uattk, dieroll);
         (void) passive(mtmp, uwep, mhit, !DEADMONSTER(mtmp), AT_WEAP, !uwep);
 
-        /* stop attacking if weapon is gone or hero got killed and
-           life-saved after passive counter-attack */
-        if (!uwep || u.umortality > umort)
+        /* stop attacking if weapon is gone or hero got paralyzed or
+           killed (and then life-saved) by passive counter-attack */
+        if (!uwep || g.multi < 0 || u.umortality > umort)
             break;
     }
     /* set up for next time */
@@ -666,17 +679,18 @@ hitum(struct monst *mon, struct attack *uattk)
     struct obj *wepbefore = uwep;
     int armorpenalty, attknum = 0,
         x = u.ux + u.dx, y = u.uy + u.dy,
+        oldumort = u.umortality,
         tmp = find_roll_to_hit(mon, uattk->aatyp, uwep,
-                               &attknum, &armorpenalty);
-    int dieroll = rnd(20);
-    int mhit = (tmp > dieroll || u.uswallow);
+                               &attknum, &armorpenalty),
+        dieroll = rnd(20),
+        mhit = (tmp > dieroll || u.uswallow);
 
     mon_maybe_wakeup_on_hit(mon);
 
     /* Cleaver attacks three spots, 'mon' and one on either side of 'mon';
        it can't be part of dual-wielding but we guard against that anyway;
        cleave return value reflects status of primary target ('mon') */
-    if (uwep && uwep->oartifact == ART_CLEAVER && !u.twoweap
+    if (u_wield_art(ART_CLEAVER) && !u.twoweap
         && !u.uswallow && !u.ustuck && !NODIAG(u.umonnum))
         return hitum_cleave(mon, uattk);
 
@@ -689,9 +703,13 @@ hitum(struct monst *mon, struct attack *uattk)
     (void) passive(mon, uwep, mhit, malive, AT_WEAP, wep_was_destroyed);
 
     /* second attack for two-weapon combat; won't occur if Stormbringer
-       overrode confirmation (assumes Stormbringer is primary weapon)
-       or if the monster was killed or knocked to different location */
-    if (u.twoweap && !g.override_confirmation && malive && m_at(x, y) == mon) {
+       overrode confirmation (assumes Stormbringer is primary weapon),
+       or if hero became paralyzed by passive counter-attack, or if hero
+       was killed by passive counter-attack and got life-saved, or if
+       monster was killed or knocked to different location */
+    if (u.twoweap && !(g.override_confirmation
+                       || g.multi < 0 || u.umortality > oldumort
+                       || !malive || m_at(x, y) != mon)) {
         tmp = find_roll_to_hit(mon, uattk->aatyp, uswapwep, &attknum,
                                &armorpenalty);
         mon_maybe_wakeup_on_hit(mon);
@@ -747,7 +765,7 @@ hmon_hitmon(
      * More complications:  first_weapon_hit() should be called before
      * xkilled() in order to have the gamelog messages in the right order.
      * So it can't be deferred until end of known_hitum() as was originally
-     * done.  We might call it directly or indirectly via mhurtle_to_doom().
+     * done.
      */
     boolean hittxt = FALSE, destroyed = FALSE, already_killed = FALSE;
     boolean get_dmg_bonus = TRUE;
@@ -856,7 +874,7 @@ hmon_hitmon(
                 if (!train_weapon_skill || mon == u.ustuck || u.twoweap
                     /* Cleaver can hit up to three targets at once so don't
                        let it also hit from behind or shatter foes' weapons */
-                    || (hand_to_hand && obj->oartifact == ART_CLEAVER)) {
+                    || (hand_to_hand && is_art(obj, ART_CLEAVER))) {
                     ; /* no special bonuses */
                 } else if (mon->mflee && Role_if(PM_ROGUE) && !Upolyd
                            /* multi-shot throwing is too powerful here */
@@ -1294,6 +1312,11 @@ hmon_hitmon(
     if (jousting) {
         tmp += d(2, (obj == uwep) ? 10 : 2); /* [was in dmgval()] */
         You("joust %s%s", mon_nam(mon), canseemon(mon) ? exclam(tmp) : ".");
+        /* if this hit just broke the never-hit-with-wielded-weapon conduct
+           (handled by caller...), give a livelog message for that now */
+        if (u.uconduct.weaphit <= 1)
+            first_weapon_hit(obj);
+
         if (jousting < 0) {
             pline("%s shatters on impact!", Yname2(obj));
             /* (must be either primary or secondary weapon to get here) */
@@ -1305,7 +1328,7 @@ hmon_hitmon(
             useup(obj);
             obj = (struct obj *) 0;
         }
-        if (mhurtle_to_doom(mon, tmp, &mdat, TRUE))
+        if (mhurtle_to_doom(mon, tmp, &mdat))
             already_killed = TRUE;
         hittxt = TRUE;
     } else if (unarmed && tmp > 1 && !thrown && !obj && !Upolyd) {
@@ -1315,7 +1338,7 @@ hmon_hitmon(
             if (canspotmon(mon))
                 pline("%s %s from your powerful strike!", Monnam(mon),
                       makeplural(stagger(mon->data, "stagger")));
-            if (mhurtle_to_doom(mon, tmp, &mdat, FALSE))
+            if (mhurtle_to_doom(mon, tmp, &mdat))
                 already_killed = TRUE;
             hittxt = TRUE;
         }
@@ -1326,10 +1349,12 @@ hmon_hitmon(
             /* known_hitum 'what counts as a weapon' criteria */
             && (obj->oclass == WEAPON_CLASS || is_weptool(obj))
             && (thrown == HMON_MELEE || thrown == HMON_APPLIED)
+            /* if jousting, the hit was already logged */
+            && !jousting
             /* note: caller has already incremented u.uconduct.weaphit
                so we test for 1; 0 shouldn't be able to happen here... */
             && tmp > 0 && u.uconduct.weaphit <= 1)
-            first_weapon_hit();
+            first_weapon_hit(obj);
         mon->mhp -= tmp;
     }
     /* adjustments might have made tmp become less than what
@@ -1363,7 +1388,7 @@ hmon_hitmon(
 
         if ((mclone = clone_mon(mon, 0, 0)) != 0) {
             withwhat[0] = '\0';
-            if (u.twoweap && flags.verbose)
+            if (u.twoweap && Verbose(4, hmon_hitmon1))
                 Sprintf(withwhat, " with %s", yname(obj));
             pline("%s divides as you hit it%s!", Monnam(mon), withwhat);
             hittxt = TRUE;
@@ -1376,7 +1401,7 @@ hmon_hitmon(
             || (thrown && g.m_shot.n > 1 && g.m_shot.o == obj->otyp))) {
         if (thrown)
             hit(mshot_xname(obj), mon, exclam(tmp));
-        else if (!flags.verbose)
+        else if (!Verbose(4, hmon_hitmon2))
             You("hit it.");
         else /* hand_to_hand */
             You("%s %s%s",
@@ -1493,19 +1518,8 @@ static boolean
 mhurtle_to_doom(
     struct monst *mon,         /* target monster */
     int tmp,                   /* amount of pending damage */
-    struct permonst **mptr,    /* caller's cached copy of mon->data */
-    boolean by_wielded_weapon) /* True: violating a potential conduct */
+    struct permonst **mptr)    /* caller's cached copy of mon->data */
 {
-    /* if this hit is breaking the never-hit-with-wielded-weapon conduct
-       (handled by caller's caller...) we need to log the message about
-       that before mon is killed; without this, the log entry sequence
-        N : killed for the first time
-        N : hit with a wielded weapon for the first time
-       reported on the same turn (N) looks "suboptimal";
-       u.uconduct.weaphit has already been incremented => 1 is first hit */
-    if (by_wielded_weapon && u.uconduct.weaphit <= 1)
-        first_weapon_hit();
-
     /* only hurtle if pending physical damage (tmp) isn't going to kill mon */
     if (tmp < mon->mhp) {
         mhurtle(mon, u.dx, u.dy, 1);
@@ -1522,9 +1536,32 @@ mhurtle_to_doom(
 /* gamelog version of "you've broken never-hit-with-wielded-weapon conduct;
    the conduct is tracked in known_hitum(); we're called by hmon_hitmon() */
 static void
-first_weapon_hit(void)
+first_weapon_hit(struct obj *weapon)
 {
-    livelog_printf(LL_CONDUCT, "hit with a wielded weapon for the first time");
+    char buf[BUFSZ];
+
+    /* avoid xname() since that includes "named <foo>" and we don't want
+       player-supplied <foo> in livelog */
+    buf[0] = '\0';
+    /* include "cursed" if known but don't bother with blessed */
+    if (weapon->cursed && weapon->bknown)
+        Strcat(buf, "cursed "); /* normally supplied by doname() */
+    if (obj_is_pname(weapon)) {
+        Strcat(buf, ONAME(weapon)); /* fully IDed artifact */
+    } else {
+        Strcat(buf, simpleonames(weapon));
+        if (weapon->oartifact && weapon->dknown)
+            Sprintf(eos(buf), " named %s", bare_artifactname(weapon));
+    }
+
+    /* when a hit breaks the never-hit-with-wielded-weapon conduct
+       (handled by caller) we need to log the message about that before
+       monster is possibly killed; otherwise getting log entry sequence
+         N : killed for the first time
+         N : hit with a wielded weapon for the first time
+       reported on the same turn (N) looks "suboptimal" */
+    livelog_printf(LL_CONDUCT,
+                   "hit with a wielded weapon (%s) for the first time", buf);
 }
 
 static boolean
@@ -1952,31 +1989,22 @@ void
 mhitm_ad_dren(struct monst *magr, struct attack *mattk, struct monst *mdef,
               struct mhitm_data *mhm)
 {
+    boolean negated = mhitm_mgc_atk_negated(magr, mdef);
+
     if (magr == &g.youmonst) {
         /* uhitm */
-        int armpro = magic_negation(mdef);
-        /* since hero can't be cancelled, only defender's armor applies */
-        boolean negated = !(rn2(10) >= 3 * armpro);
-
         if (!negated && !rn2(4))
             xdrainenergym(mdef, TRUE);
         mhm->damage = 0;
     } else if (mdef == &g.youmonst) {
         /* mhitu */
-        int armpro = magic_negation(mdef);
-        boolean uncancelled = !magr->mcan && (rn2(10) >= 3 * armpro);
-
         hitmsg(magr, mattk);
-        if (uncancelled && !rn2(4)) /* 25% chance */
+        if (!negated && !rn2(4)) /* 25% chance */
             drain_en(mhm->damage);
         mhm->damage = 0;
     } else {
         /* mhitm */
-        /* cancellation factor is the same as when attacking the hero */
-        int armpro = magic_negation(mdef);
-        boolean cancelled = magr->mcan || !(rn2(10) >= 3 * armpro);
-
-        if (!cancelled && !rn2(4))
+        if (!negated && !rn2(4))
             xdrainenergym(mdef, (boolean) (g.vis && canspotmon(mdef)
                                            && mattk->aatyp != AT_ENGL));
         mhm->damage = 0;
@@ -1988,12 +2016,10 @@ mhitm_ad_drli(
     struct monst *magr, struct attack *mattk,
     struct monst *mdef, struct mhitm_data *mhm)
 {
+    boolean negated = mhitm_mgc_atk_negated(magr, mdef);
+
     if (magr == &g.youmonst) {
         /* uhitm */
-        int armpro = magic_negation(mdef);
-        /* since hero can't be cancelled, only defender's armor applies */
-        boolean negated = !(rn2(10) >= 3 * armpro);
-
         if (!negated && !rn2(3)
             && !(resists_drli(mdef) || defended(mdef, AD_DRLI))) {
             mhm->damage = d(2, 6); /* Stormbringer uses monhp_per_lvl
@@ -2024,11 +2050,8 @@ mhitm_ad_drli(
         }
     } else if (mdef == &g.youmonst) {
         /* mhitu */
-        int armpro = magic_negation(mdef);
-        boolean uncancelled = !magr->mcan && (rn2(10) >= 3 * armpro);
-
         hitmsg(magr, mattk);
-        if (uncancelled && !rn2(3) && !Drain_resistance) {
+        if (!negated && !rn2(3) && !Drain_resistance) {
             losexp("life drainage");
 
             /* unlike hitting with Stormbringer, wounded attacker doesn't
@@ -2036,13 +2059,11 @@ mhitm_ad_drli(
         }
     } else {
         /* mhitm */
-        int armpro = magic_negation(mdef);
-        boolean cancelled = magr->mcan || !(rn2(10) >= 3 * armpro);
         /* mhitm_ad_deth gets redirected here for Death's touch */
         boolean is_death = (mattk->adtyp == AD_DETH);
 
         if (is_death
-            || (!cancelled && !rn2(3)
+            || (!negated && !rn2(3)
                 && !(resists_drli(mdef) || defended(mdef, AD_DRLI)))) {
             if (!is_death)
                 mhm->damage = d(2, 6); /* Stormbringer uses monhp_per_lvl (1d8) */
@@ -2072,14 +2093,11 @@ mhitm_ad_fire(
     struct monst *magr, struct attack *mattk,
     struct monst *mdef, struct mhitm_data *mhm)
 {
+    boolean negated = mhitm_mgc_atk_negated(magr, mdef);
     struct permonst *pd = mdef->data;
 
     if (magr == &g.youmonst) {
         /* uhitm */
-        int armpro = magic_negation(mdef);
-        /* since hero can't be cancelled, only defender's armor applies */
-        boolean negated = !(rn2(10) >= 3 * armpro);
-
         if (negated) {
             mhm->damage = 0;
             return;
@@ -2116,11 +2134,8 @@ mhitm_ad_fire(
         ignite_items(mdef->minvent);
     } else if (mdef == &g.youmonst) {
         /* mhitu */
-        int armpro = magic_negation(mdef);
-        boolean uncancelled = !magr->mcan && (rn2(10) >= 3 * armpro);
-
         hitmsg(magr, mattk);
-        if (uncancelled) {
+        if (!negated) {
             pline("You're %s!", on_fire(pd, mattk));
             if (completelyburns(pd)) { /* paper or straw golem */
                 You("go up in flames!");
@@ -2145,10 +2160,7 @@ mhitm_ad_fire(
             mhm->damage = 0;
     } else {
         /* mhitm */
-        int armpro = magic_negation(mdef);
-        boolean cancelled = magr->mcan || !(rn2(10) >= 3 * armpro);
-
-        if (cancelled) {
+        if (negated) {
             mhm->damage = 0;
             return;
         }
@@ -2192,12 +2204,10 @@ mhitm_ad_cold(
     struct monst *magr, struct attack *mattk,
     struct monst *mdef, struct mhitm_data *mhm)
 {
+    boolean negated = mhitm_mgc_atk_negated(magr, mdef);
+
     if (magr == &g.youmonst) {
         /* uhitm */
-        int armpro = magic_negation(mdef);
-        /* since hero can't be cancelled, only defender's armor applies */
-        boolean negated = !(rn2(10) >= 3 * armpro);
-
         if (negated) {
             mhm->damage = 0;
             return;
@@ -2214,11 +2224,8 @@ mhitm_ad_cold(
         mhm->damage += destroy_mitem(mdef, POTION_CLASS, AD_COLD);
     } else if (mdef == &g.youmonst) {
         /* mhitu */
-        int armpro = magic_negation(mdef);
-        boolean uncancelled = !magr->mcan && (rn2(10) >= 3 * armpro);
-
         hitmsg(magr, mattk);
-        if (uncancelled) {
+        if (!negated) {
             pline("You're covered in frost!");
             if (Cold_resistance) {
                 pline_The("frost doesn't seem cold!");
@@ -2231,10 +2238,7 @@ mhitm_ad_cold(
             mhm->damage = 0;
     } else {
         /* mhitm */
-        int armpro = magic_negation(mdef);
-        boolean cancelled = magr->mcan || !(rn2(10) >= 3 * armpro);
-
-        if (cancelled) {
+        if (negated) {
             mhm->damage = 0;
             return;
         }
@@ -2256,12 +2260,10 @@ mhitm_ad_elec(
     struct monst *magr, struct attack *mattk,
     struct monst *mdef, struct mhitm_data *mhm)
 {
+    boolean negated = mhitm_mgc_atk_negated(magr, mdef);
+
     if (magr == &g.youmonst) {
         /* uhitm */
-        int armpro = magic_negation(mdef);
-        /* since hero can't be cancelled, only defender's armor applies */
-        boolean negated = !(rn2(10) >= 3 * armpro);
-
         if (negated) {
             mhm->damage = 0;
             return;
@@ -2280,11 +2282,8 @@ mhitm_ad_elec(
         mhm->damage += destroy_mitem(mdef, RING_CLASS, AD_ELEC);
     } else if (mdef == &g.youmonst) {
         /* mhitu */
-        int armpro = magic_negation(mdef);
-        boolean uncancelled = !magr->mcan && (rn2(10) >= 3 * armpro);
-
         hitmsg(magr, mattk);
-        if (uncancelled) {
+        if (!negated) {
             You("get zapped!");
             if (Shock_resistance) {
                 pline_The("zap doesn't shock you!");
@@ -2299,10 +2298,7 @@ mhitm_ad_elec(
             mhm->damage = 0;
     } else {
         /* mhitm */
-        int armpro = magic_negation(mdef);
-        boolean cancelled = magr->mcan || !(rn2(10) >= 3 * armpro);
-
-        if (cancelled) {
+        if (negated) {
             mhm->damage = 0;
             return;
         }
@@ -2439,12 +2435,10 @@ void
 mhitm_ad_tlpt(struct monst *magr, struct attack *mattk, struct monst *mdef,
               struct mhitm_data *mhm)
 {
+    boolean negated = mhitm_mgc_atk_negated(magr, mdef);
+
     if (magr == &g.youmonst) {
         /* uhitm */
-        int armpro = magic_negation(mdef);
-        /* since hero can't be cancelled, only defender's armor applies */
-        boolean negated = !(rn2(10) >= 3 * armpro);
-
         if (mhm->damage <= 0)
             mhm->damage = 1;
         if (!negated) {
@@ -2464,13 +2458,11 @@ mhitm_ad_tlpt(struct monst *magr, struct attack *mattk, struct monst *mdef,
         }
     } else if (mdef == &g.youmonst) {
         /* mhitu */
-        int armpro = magic_negation(mdef);
-        boolean uncancelled = !magr->mcan && (rn2(10) >= 3 * armpro);
         int tmphp;
 
         hitmsg(magr, mattk);
-        if (uncancelled) {
-            if (flags.verbose)
+        if (!negated) {
+            if (Verbose(4, mhitm_ad_tlpt))
                 Your("position suddenly seems %suncertain!",
                      (Teleport_control && !Stunned && !unconscious()) ? ""
                      : "very ");
@@ -2508,10 +2500,7 @@ mhitm_ad_tlpt(struct monst *magr, struct attack *mattk, struct monst *mdef,
         }
     } else {
         /* mhitm */
-        int armpro = magic_negation(mdef);
-        boolean cancelled = magr->mcan || !(rn2(10) >= 3 * armpro);
-
-        if (!cancelled && mhm->damage < mdef->mhp && !tele_restrict(mdef)) {
+        if (!negated && mhm->damage < mdef->mhp && !tele_restrict(mdef)) {
             char mdef_Monnam[BUFSZ];
             boolean wasseen = canspotmon(mdef);
 
@@ -2674,14 +2663,11 @@ void
 mhitm_ad_drst(struct monst *magr, struct attack *mattk, struct monst *mdef,
               struct mhitm_data *mhm)
 {
+    boolean negated = mhitm_mgc_atk_negated(magr, mdef);
     struct permonst *pa = magr->data;
 
     if (magr == &g.youmonst) {
         /* uhitm */
-        int armpro = magic_negation(mdef);
-        /* since hero can't be cancelled, only defender's armor applies */
-        boolean negated = !(rn2(10) >= 3 * armpro);
-
         if (!negated && !rn2(8)) {
             Your("%s was poisoned!", mpoisons_subj(magr, mattk));
             if (resists_poison(mdef)) {
@@ -2696,8 +2682,6 @@ mhitm_ad_drst(struct monst *magr, struct attack *mattk, struct monst *mdef,
         }
     } else if (mdef == &g.youmonst) {
         /* mhitu */
-        int armpro = magic_negation(mdef);
-        boolean uncancelled = !magr->mcan && (rn2(10) >= 3 * armpro);
         int ptmp = A_STR;  /* A_STR == 0 */
         char buf[BUFSZ];
 
@@ -2707,17 +2691,14 @@ mhitm_ad_drst(struct monst *magr, struct attack *mattk, struct monst *mdef,
         case AD_DRCO: ptmp = A_CON; break;
         }
         hitmsg(magr, mattk);
-        if (uncancelled && !rn2(8)) {
+        if (!negated && !rn2(8)) {
             Sprintf(buf, "%s %s", s_suffix(Monnam(magr)),
                     mpoisons_subj(magr, mattk));
             poisoned(buf, ptmp, pmname(pa, Mgender(magr)), 30, FALSE);
         }
     } else {
         /* mhitm */
-        int armpro = magic_negation(mdef);
-        boolean cancelled = magr->mcan || !(rn2(10) >= 3 * armpro);
-
-        if (!cancelled && !rn2(8)) {
+        if (!negated && !rn2(8)) {
             if (g.vis && canspotmon(magr))
                 pline("%s %s was poisoned!", s_suffix(Monnam(magr)),
                       mpoisons_subj(magr, mattk));
@@ -2842,31 +2823,22 @@ mhitm_ad_stck(
     struct monst *magr, struct attack *mattk,
     struct monst *mdef, struct mhitm_data *mhm)
 {
+    boolean negated = mhitm_mgc_atk_negated(magr, mdef);
     struct permonst *pd = mdef->data;
 
     if (magr == &g.youmonst) {
         /* uhitm */
-        int armpro = magic_negation(mdef);
-        /* since hero can't be cancelled, only defender's armor applies */
-        boolean negated = !(rn2(10) >= 3 * armpro);
-
         if (!negated && !sticks(pd) && next2u(mdef->mx, mdef->my))
             set_ustuck(mdef); /* it's now stuck to you */
     } else if (mdef == &g.youmonst) {
         /* mhitu */
-        int armpro = magic_negation(mdef);
-        boolean uncancelled = !magr->mcan && (rn2(10) >= 3 * armpro);
-
         hitmsg(magr, mattk);
-        if (uncancelled && !u.ustuck && !sticks(pd)) {
+        if (!negated && !u.ustuck && !sticks(pd)) {
             set_ustuck(magr);
         }
     } else {
         /* mhitm */
-        int armpro = magic_negation(mdef);
-        boolean cancelled = magr->mcan || !(rn2(10) >= 3 * armpro);
-
-        if (cancelled)
+        if (negated)
             mhm->damage = 0;
     }
 }
@@ -2897,7 +2869,7 @@ mhitm_ad_wrap(struct monst *magr, struct attack *mattk, struct monst *mdef,
                     pline("%s is being crushed.", Monnam(mdef));
             } else {
                 mhm->damage = 0;
-                if (flags.verbose)
+                if (Verbose(4, mhitm_ad_wrap1))
                     You("brush against %s %s.", s_suffix(mon_nam(mdef)),
                         mbodypart(mdef, LEG));
             }
@@ -2932,7 +2904,7 @@ mhitm_ad_wrap(struct monst *magr, struct attack *mattk, struct monst *mdef,
                 }
             } else {
                 mhm->damage = 0;
-                if (flags.verbose)
+                if (Verbose(4, mhitm_ad_wrap2))
                     pline("%s brushes against your %s.", Monnam(magr),
                           body_part(LEG));
             }
@@ -2949,12 +2921,10 @@ void
 mhitm_ad_plys(struct monst *magr, struct attack *mattk, struct monst *mdef,
               struct mhitm_data *mhm)
 {
+    boolean negated = mhitm_mgc_atk_negated(magr, mdef);
+
     if (magr == &g.youmonst) {
         /* uhitm */
-        int armpro = magic_negation(mdef);
-        /* since hero can't be cancelled, only defender's armor applies */
-        boolean negated = !(rn2(10) >= 3 * armpro);
-
         if (!negated && mdef->mcanmove && !rn2(3) && mhm->damage < mdef->mhp) {
             if (!Blind)
                 pline("%s is frozen by you!", Monnam(mdef));
@@ -2962,11 +2932,8 @@ mhitm_ad_plys(struct monst *magr, struct attack *mattk, struct monst *mdef,
         }
     } else if (mdef == &g.youmonst) {
         /* mhitu */
-        int armpro = magic_negation(mdef);
-        boolean uncancelled = !magr->mcan && (rn2(10) >= 3 * armpro);
-
         hitmsg(magr, mattk);
-        if (uncancelled && g.multi >= 0 && !rn2(3)) {
+        if (!negated && g.multi >= 0 && !rn2(3)) {
             if (Free_action) {
                 You("momentarily stiffen.");
             } else {
@@ -2984,10 +2951,7 @@ mhitm_ad_plys(struct monst *magr, struct attack *mattk, struct monst *mdef,
         }
     } else {
         /* mhitm */
-        int armpro = magic_negation(mdef);
-        boolean cancelled = magr->mcan || !(rn2(10) >= 3 * armpro);
-
-        if (!cancelled && mdef->mcanmove) {
+        if (!negated && mdef->mcanmove) {
             if (g.vis && canspotmon(mdef)) {
                 char buf[BUFSZ];
                 Strcpy(buf, Monnam(mdef));
@@ -3002,12 +2966,10 @@ void
 mhitm_ad_slee(struct monst *magr, struct attack *mattk, struct monst *mdef,
               struct mhitm_data *mhm UNUSED)
 {
+    boolean negated = mhitm_mgc_atk_negated(magr, mdef);
+
     if (magr == &g.youmonst) {
         /* uhitm */
-        int armpro = magic_negation(mdef);
-        /* since hero can't be cancelled, only defender's armor applies */
-        boolean negated = !(rn2(10) >= 3 * armpro);
-
         if (!negated && !mdef->msleeping && sleep_monst(mdef, rnd(10), -1)) {
             if (!Blind)
                 pline("%s is put to sleep by you!", Monnam(mdef));
@@ -3015,11 +2977,8 @@ mhitm_ad_slee(struct monst *magr, struct attack *mattk, struct monst *mdef,
         }
     } else if (mdef == &g.youmonst) {
         /* mhitu */
-        int armpro = magic_negation(mdef);
-        boolean uncancelled = !magr->mcan && (rn2(10) >= 3 * armpro);
-
         hitmsg(magr, mattk);
-        if (uncancelled && g.multi >= 0 && !rn2(5)) {
+        if (!negated && g.multi >= 0 && !rn2(5)) {
             if (Sleep_resistance) {
                 monstseesu(M_SEEN_SLEEP);
                 return;
@@ -3032,10 +2991,7 @@ mhitm_ad_slee(struct monst *magr, struct attack *mattk, struct monst *mdef,
         }
     } else {
         /* mhitm */
-        int armpro = magic_negation(mdef);
-        boolean cancelled = magr->mcan || !(rn2(10) >= 3 * armpro);
-
-        if (!cancelled && !mdef->msleeping
+        if (!negated && !mdef->msleeping
             && sleep_monst(mdef, rnd(10), -1)) {
             if (g.vis && canspotmon(mdef)) {
                 char buf[BUFSZ];
@@ -3052,14 +3008,11 @@ void
 mhitm_ad_slim(struct monst *magr, struct attack *mattk, struct monst *mdef,
               struct mhitm_data *mhm)
 {
+    boolean negated = mhitm_mgc_atk_negated(magr, mdef);
     struct permonst *pd = mdef->data;
 
     if (magr == &g.youmonst) {
         /* uhitm */
-        int armpro = magic_negation(mdef);
-        /* since hero can't be cancelled, only defender's armor applies */
-        boolean negated = !(rn2(10) >= 3 * armpro);
-
         if (negated)
             return; /* physical damage only */
         if (!rn2(4) && !slimeproof(pd)) {
@@ -3067,7 +3020,7 @@ mhitm_ad_slim(struct monst *magr, struct attack *mattk, struct monst *mdef,
                 /* this assumes newcham() won't fail; since hero has
                    a slime attack, green slimes haven't been geno'd */
                 You("turn %s into slime.", mon_nam(mdef));
-                if (newcham(mdef, &mons[PM_GREEN_SLIME], FALSE, FALSE))
+                if (newcham(mdef, &mons[PM_GREEN_SLIME], NO_NC_FLAGS))
                     pd = mdef->data;
             }
             /* munslime attempt could have been fatal */
@@ -3080,11 +3033,8 @@ mhitm_ad_slim(struct monst *magr, struct attack *mattk, struct monst *mdef,
         }
     } else if (mdef == &g.youmonst) {
         /* mhitu */
-        int armpro = magic_negation(mdef);
-        boolean uncancelled = !magr->mcan && (rn2(10) >= 3 * armpro);
-
         hitmsg(magr, mattk);
-        if (!uncancelled)
+        if (negated)
             return;
         if (flaming(pd)) {
             pline_The("slime burns away!");
@@ -3102,15 +3052,15 @@ mhitm_ad_slim(struct monst *magr, struct attack *mattk, struct monst *mdef,
             pline("Yuck!");
     } else {
         /* mhitm */
-        int armpro = magic_negation(mdef);
-        boolean cancelled = magr->mcan || !(rn2(10) >= 3 * armpro);
-
-        if (cancelled)
+        if (negated)
             return; /* physical damage only */
         if (!rn2(4) && !slimeproof(pd)) {
             if (!munslime(mdef, FALSE) && !DEADMONSTER(mdef)) {
-                if (newcham(mdef, &mons[PM_GREEN_SLIME], FALSE,
-                            (boolean) (g.vis && canseemon(mdef))))
+                unsigned ncflags = NO_NC_FLAGS;
+
+                if (g.vis && canseemon(mdef))
+                    ncflags |= NC_SHOW_MSG;
+                if (newcham(mdef, &mons[PM_GREEN_SLIME], ncflags)) 
                     pd = mdef->data;
                 mdef->mstrategy &= ~STRAT_WAITFORU;
                 mhm->hitflags = MM_HIT;
@@ -3135,13 +3085,12 @@ mhitm_ad_ench(struct monst *magr, struct attack *mattk, struct monst *mdef,
         /* there's no msomearmor() function, so just do damage */
     } else if (mdef == &g.youmonst) {
         /* mhitu */
-        int armpro = magic_negation(mdef);
-        boolean uncancelled = !magr->mcan && (rn2(10) >= 3 * armpro);
+        boolean negated = mhitm_mgc_atk_negated(magr, mdef);
 
         hitmsg(magr, mattk);
         /* uncancelled is sufficient enough; please
            don't make this attack less frequent */
-        if (uncancelled) {
+        if (!negated) {
             struct obj *obj = some_armor(mdef);
 
             if (!obj) {
@@ -3179,15 +3128,13 @@ mhitm_ad_slow(
     struct monst *magr, struct attack *mattk,
     struct monst *mdef, struct mhitm_data *mhm UNUSED)
 {
+    boolean negated = mhitm_mgc_atk_negated(magr, mdef);
+
     if (defended(mdef, AD_SLOW))
         return;
 
     if (magr == &g.youmonst) {
         /* uhitm */
-        int armpro = magic_negation(mdef);
-        /* since hero can't be cancelled, only defender's armor applies */
-        boolean negated = !(rn2(10) >= 3 * armpro);
-
         if (!negated && mdef->mspeed != MSLOW) {
             unsigned int oldspeed = mdef->mspeed;
 
@@ -3197,18 +3144,12 @@ mhitm_ad_slow(
         }
     } else if (mdef == &g.youmonst) {
         /* mhitu */
-        int armpro = magic_negation(mdef);
-        boolean uncancelled = !magr->mcan && (rn2(10) >= 3 * armpro);
-
         hitmsg(magr, mattk);
-        if (uncancelled && HFast && !rn2(4))
+        if (!negated && HFast && !rn2(4))
             u_slow_down();
     } else {
         /* mhitm */
-        int armpro = magic_negation(mdef);
-        boolean cancelled = magr->mcan || !(rn2(10) >= 3 * armpro);
-
-        if (!cancelled && mdef->mspeed != MSLOW) {
+        if (!negated && mdef->mspeed != MSLOW) {
             unsigned int oldspeed = mdef->mspeed;
 
             mon_adjust_speed(mdef, -1, (struct obj *) 0);
@@ -3261,22 +3202,17 @@ void
 mhitm_ad_poly(struct monst *magr, struct attack *mattk,
               struct monst *mdef, struct mhitm_data *mhm)
 {
+    boolean negated = mhitm_mgc_atk_negated(magr, mdef);
+
     if (magr == &g.youmonst) {
         /* uhitm */
-        int armpro = magic_negation(mdef);
-        /* require weaponless attack in order to honor AD_POLY;
-           since hero can't be cancelled, only defender's armor applies */
-        boolean negated = uwep || !(rn2(10) >= 3 * armpro);
-
-        if (!negated && mhm->damage < mdef->mhp)
+        /* require weaponless attack in order to honor AD_POLY */
+        if (!uwep && !negated && mhm->damage < mdef->mhp)
             mhm->damage = mon_poly(&g.youmonst, mdef, mhm->damage);
     } else if (mdef == &g.youmonst) {
         /* mhitu */
-        int armpro = magic_negation(&g.youmonst);
-        boolean uncancelled = !magr->mcan && (rn2(10) >= 3 * armpro);
-
         hitmsg(magr, mattk);
-        if (uncancelled
+        if (!negated
             && Maybe_Half_Phys(mhm->damage) < (Upolyd ? u.mh : u.uhp))
             mhm->damage = mon_poly(magr, &g.youmonst, mhm->damage);
     } else {
@@ -3524,9 +3460,11 @@ mhitm_ad_phys(struct monst *magr, struct attack *mattk, struct monst *mdef,
             if (!u.ustuck && rn2(2)) {
                 if (u_slip_free(magr, mattk)) {
                     mhm->damage = 0;
+                    mhm->hitflags |= MM_MISS;
                 } else {
                     set_ustuck(magr);
                     pline("%s grabs you!", Monnam(magr));
+                    mhm->hitflags |= MM_HIT;
                 }
             } else if (u.ustuck == magr) {
                 exercise(A_STR, FALSE);
@@ -3562,8 +3500,10 @@ mhitm_ad_phys(struct monst *magr, struct attack *mattk, struct monst *mdef,
                     mhm->damage = 1;
                 if (!(otmp->oartifact && artifact_hit(magr, mdef, otmp,
                                                       &mhm->damage,
-                                                      g.mhitu_dieroll)))
+                                                      g.mhitu_dieroll))) {
                     hitmsg(magr, mattk);
+                    mhm->hitflags |= MM_HIT;
+                }
                 if (!mhm->damage)
                     return;
                 if (objects[otmp->otyp].oc_material == SILVER
@@ -3596,8 +3536,10 @@ mhitm_ad_phys(struct monst *magr, struct attack *mattk, struct monst *mdef,
                 }
                 rustm(&g.youmonst, otmp);
             } else if (mattk->aatyp != AT_TUCH || mhm->damage != 0
-                       || magr != u.ustuck)
+                       || magr != u.ustuck) {
                 hitmsg(magr, mattk);
+                mhm->hitflags |= MM_HIT;
+            }
         }
     } else {
         /* mhitm */
@@ -3639,6 +3581,7 @@ mhitm_ad_phys(struct monst *magr, struct attack *mattk, struct monst *mdef,
                     if (g.vis)
                         pline("%s hits %s.", Monnam(magr),
                               mon_nam_too(mdef, magr));
+                    mhm->hitflags |= MM_HIT;
                 }
                 /* artifact_hit updates 'tmp' but doesn't inflict any
                    damage; however, it might cause carried items to be
@@ -3664,8 +3607,9 @@ mhitm_ad_phys(struct monst *magr, struct attack *mattk, struct monst *mdef,
 }
 
 void
-mhitm_ad_ston(struct monst *magr, struct attack *mattk, struct monst *mdef,
-              struct mhitm_data *mhm)
+mhitm_ad_ston(
+    struct monst *magr, struct attack *mattk,
+    struct monst *mdef, struct mhitm_data *mhm)
 {
     if (magr == &g.youmonst) {
         /* uhitm */
@@ -3680,10 +3624,31 @@ mhitm_ad_ston(struct monst *magr, struct attack *mattk, struct monst *mdef,
                 if (!Deaf)
                     You_hear("a cough from %s!", mon_nam(magr));
             } else {
-                if (!Deaf)
+                if (Hallucination && !Blind) {
+                    You_hear("hissing."); /* You_hear() deals with Deaf */
+                    pline("%s appears to be blowing you a kiss...",
+                          Monnam(magr));
+                } else if (!Deaf) {
                     You_hear("%s hissing!", s_suffix(mon_nam(magr)));
-                if (!rn2(10)
-                    || (flags.moonphase == NEW_MOON && !have_lizard())) {
+                } else if (!Blind) {
+                    pline("%s seems to grimace.", Monnam(magr));
+                }
+                /*
+                 * 3.7:  New moon is no longer overridden by carrying a
+                 * lizard corpse.  Having the moon's impact on terrestrial
+                 * activity be affected by carrying a dead critter felt
+                 * silly.
+                 *
+                 * That behavior dated to when there were no corpse objects
+                 * yet; "dead lizard" was a distinct item.  With a lizard
+                 * corpse, hero can eat it to survive petrification and
+                 * probably retain a partly eaten corpse for future use.
+                 *
+                 * Maintaining foodless conduct during a new moon might
+                 * become a little harder.  Clearing out cockatrice nests
+                 * could become quite a bit harder.
+                 */
+                if (!rn2(10) || flags.moonphase == NEW_MOON) {
                     if (do_stone_u(magr)) {
                         mhm->hitflags = MM_HIT;
                         mhm->done = TRUE;
@@ -3716,11 +3681,10 @@ mhitm_ad_were(
             return;
     } else if (mdef == &g.youmonst) {
         /* mhitu */
-        int armpro = magic_negation(mdef);
-        boolean uncancelled = !magr->mcan && (rn2(10) >= 3 * armpro);
+        boolean negated = mhitm_mgc_atk_negated(magr, mdef);
 
         hitmsg(magr, mattk);
-        if (uncancelled && !rn2(4) && u.ulycn == NON_PM
+        if (!negated && !rn2(4) && u.ulycn == NON_PM
             && !Protection_from_shape_changers && !defends(AD_WERE, uwep)) {
             urgent_pline("You feel feverish.");
             exercise(A_CON, FALSE);
@@ -3962,7 +3926,7 @@ mhitm_ad_dgst(struct monst *magr, struct attack *mattk UNUSED,
             mhm->done = TRUE;
             return;
         }
-        if (flags.verbose && !Deaf)
+        if (Verbose(4, mhitm_ad_dgst) && !Deaf)
             verbalize("Burrrrp!");
         mhm->damage = mdef->mhp;
         /* Use up amulet of life saving */
@@ -4278,6 +4242,7 @@ damageum(
     }
 
     mhitm_adtyping(&g.youmonst, mattk, mdef, &mhm);
+
     if (mhm.done)
         return mhm.hitflags;
 
@@ -4295,7 +4260,7 @@ damageum(
             You_feel("embarrassed for a moment.");
             if (mhm.damage)
                 xkilled(mdef, XKILL_NOMSG);
-        } else if (!flags.verbose) {
+        } else if (!Verbose(4, damageum)) {
             You("destroy it!");
             if (mhm.damage)
                 xkilled(mdef, XKILL_NOMSG);
@@ -4408,7 +4373,7 @@ gulpum(struct monst *mdef, struct attack *mattk)
         /* force vampire in bat, cloud, or wolf form to revert back to
            vampire form now instead of dealing with that when it dies */
         if (is_vampshifter(mdef)
-            && newcham(mdef, &mons[mdef->cham], FALSE, FALSE)) {
+            && newcham(mdef, &mons[mdef->cham], NO_NC_FLAGS)) {
             You("engulf it, then expel it.");
             if (canspotmon(mdef))
                 pline("It turns into %s.", a_monnam(mdef));
@@ -4581,7 +4546,7 @@ gulpum(struct monst *mdef, struct attack *mattk)
                 if (DEADMONSTER(mdef)) /* not lifesaved */
                     return MM_DEF_DIED;
             }
-            You("%s %s!", is_animal(g.youmonst.data) ? "regurgitate" : "expel",
+            You("%s %s!", digests(g.youmonst.data) ? "regurgitate" : "expel",
                 mon_nam(mdef));
             if (Slow_digestion || is_animal(g.youmonst.data)) {
                 pline("Obviously, you didn't like %s taste.",
@@ -4593,19 +4558,123 @@ gulpum(struct monst *mdef, struct attack *mattk)
 }
 
 void
-missum(struct monst *mdef, struct attack *mattk, boolean wouldhavehit)
+missum(
+    struct monst *mdef,
+    struct attack *mattk,
+    boolean wouldhavehit)
 {
     if (wouldhavehit) /* monk is missing due to penalty for wearing suit */
         Your("armor is rather cumbersome...");
 
     if (could_seduce(&g.youmonst, mdef, mattk))
         You("pretend to be friendly to %s.", mon_nam(mdef));
-    else if (canspotmon(mdef) && flags.verbose)
+    else if (canspotmon(mdef) && Verbose(4, missum))
         You("miss %s.", mon_nam(mdef));
     else
         You("miss it.");
     if (!helpless(mdef))
         wakeup(mdef, TRUE);
+}
+
+static boolean
+m_is_steadfast(struct monst *mtmp)
+{
+    boolean is_u = (mtmp == &g.youmonst);
+    struct obj *otmp = is_u ? uwep : MON_WEP(mtmp);
+
+    /* must be on the ground */
+    if ((is_u && (Flying || Levitation))
+        || (!is_u && (is_flyer(mtmp->data) || is_floater(mtmp->data))))
+        return FALSE;
+
+    if (is_art(otmp, ART_GIANTSLAYER))
+        return TRUE;
+    return FALSE;
+}
+
+/* monster hits another monster hard enough to knock it back? */
+boolean
+mhitm_knockback(struct monst *magr,
+                struct monst *mdef,
+                struct attack *mattk,
+                int *hitflags,
+                boolean weapon_used)
+{
+    boolean u_agr = (magr == &g.youmonst);
+    boolean u_def = (mdef == &g.youmonst);
+
+    /* 1/6 chance of attack knocking back a monster */
+    if (rn2(6))
+        return FALSE;
+
+    /* monsters must be alive */
+    if ((!u_agr && DEADMONSTER(magr))
+        || (!u_def && DEADMONSTER(mdef)))
+        return FALSE;
+
+    /* attacker must be much larger than defender */
+    if (!(magr->data->msize > (mdef->data->msize + 1)))
+        return FALSE;
+
+    /* only certain attacks qualify for knockback */
+    if (!((mattk->adtyp == AD_PHYS)
+          && (mattk->aatyp == AT_CLAW
+              || mattk->aatyp == AT_KICK
+              || mattk->aatyp == AT_BUTT
+              || (mattk->aatyp == AT_WEAP && !weapon_used))))
+        return FALSE;
+
+    /* the attack must have hit */
+    /* mon-vs-mon code path doesn't set up hitflags */
+    if ((u_agr || u_def) && !(*hitflags & MM_HIT))
+        return FALSE;
+
+    /* steadfast defender cannot be pushed around */
+    if (m_is_steadfast(mdef))
+        return FALSE;
+
+    /* give the message */
+    if (u_def || canseemon(mdef)) {
+        boolean dosteed = u_def && u.usteed;
+
+        /* uhitm: You knock the gnome back with a powerful blow! */
+        /* mhitu: The red dragon knocks you back with a forceful blow! */
+        /* mhitm: The fire giant knocks the gnome back with a forceful strike! */
+
+        pline("%s knock%s %s %s with a %s %s!",
+              u_agr ? "You" : Monnam(magr),
+              u_agr ? "" : "s",
+              u_def ? "you" : y_monnam(mdef),
+              dosteed ? "out of your saddle" : "back",
+              rn2(2) ? "forceful" : "powerful",
+              rn2(2) ? "blow" : "strike");
+    }
+
+    /* do the actual knockback effect */
+    if (u_def) {
+        if (u.usteed)
+            dismount_steed(DISMOUNT_FELL);
+        else
+            hurtle(u.ux - magr->mx, u.uy - magr->my, rnd(2), FALSE);
+        if (!rn2(4))
+            make_stunned((HStun & TIMEOUT) + (long) rnd(2) + 1, TRUE);
+    } else {
+        coordxy x = u_agr ? u.ux : magr->mx;
+        coordxy y = u_agr ? u.uy : magr->my;
+
+        mhurtle(mdef, mdef->mx - x,
+                mdef->my - y, rnd(2));
+        if (DEADMONSTER(mdef))
+            *hitflags |= MM_DEF_DIED;
+        else if (!rn2(4))
+            mdef->mstun = 1;
+    }
+    if (!u_agr) {
+        if (DEADMONSTER(magr))
+            *hitflags |= MM_AGR_DIED;
+    }
+
+    return TRUE;
 }
 
 /* attack monster as a monster; returns True if mon survives */
@@ -4822,7 +4891,7 @@ hmonas(struct monst *mon)
                         if (mattk->aatyp == AT_CLAW)
                             verb = "hit"; /* not "claws" */
                         You("%s %s.", verb, mon_nam(mon));
-                        if (silverhit && flags.verbose)
+                        if (silverhit && Verbose(4, hmonas1))
                             silver_sears(&g.youmonst, mon, silverhit);
                     }
                     sum[i] = damageum(mon, mattk, specialdmg);
@@ -4886,7 +4955,7 @@ hmonas(struct monst *mon)
                    choking hug; deals damage but never grabs hold */
                 if (specialdmg) {
                     You("%s %s%s", verb, mon_nam(mon), exclam(specialdmg));
-                    if (silverhit && flags.verbose)
+                    if (silverhit && Verbose(4, hmonas2))
                         silver_sears(&g.youmonst, mon, silverhit);
                     sum[i] = damageum(mon, mattk, specialdmg);
                 } else {
@@ -4901,7 +4970,7 @@ hmonas(struct monst *mon)
                       byhand ? "throttled" : "crushed",
                       /* extra feedback for non-breather being choked */
                       unconcerned ? " but doesn't seem concerned" : "");
-                if (silverhit && flags.verbose)
+                if (silverhit && Verbose(4, hmonas3))
                     silver_sears(&g.youmonst, mon, silverhit);
                 sum[i] = damageum(mon, mattk, specialdmg);
             } else if (i >= 2 && (sum[i - 1] > MM_MISS)
@@ -4913,7 +4982,7 @@ hmonas(struct monst *mon)
                     uunstick();
                 You("grab %s!", mon_nam(mon));
                 set_ustuck(mon);
-                if (silverhit && flags.verbose)
+                if (silverhit && Verbose(4, hmonas4))
                     silver_sears(&g.youmonst, mon, silverhit);
                 sum[i] = damageum(mon, mattk, specialdmg);
             }
@@ -4985,6 +5054,9 @@ hmonas(struct monst *mon)
                            mattk->aatyp, FALSE);
         }
 
+        if (mhitm_knockback(&g.youmonst, mon, mattk, &sum[i], weapon_used))
+            break;
+
         /* don't use sum[i] beyond this point;
            'i' will be out of bounds if we get here via 'goto' */
  passivedone:
@@ -5055,7 +5127,7 @@ passive(struct monst *mon,
         break;
     case AD_ACID:
         if (mhitb && rn2(2)) {
-            if (Blind || !flags.verbose)
+            if (Blind || !Verbose(4, passive))
                 You("are splashed!");
             else
                 You("are splashed by %s %s!", s_suffix(mon_nam(mon)),
@@ -5387,17 +5459,21 @@ RESTORE_WARNING_FORMAT_NONLITERAL
 static void
 nohandglow(struct monst *mon)
 {
-    char *hands = makeplural(body_part(HAND));
+    char *hands;
+    boolean altfeedback;
 
     if (!u.umconf || mon->mconf)
         return;
+
+    hands = makeplural(body_part(HAND));
+    altfeedback = (Blind || Invisible); /* Invisible == Invis && !See_invis */
     if (u.umconf == 1) {
-        if (Blind)
+        if (altfeedback)
             Your("%s stop tingling.", hands);
         else
             Your("%s stop glowing %s.", hands, hcolor(NH_RED));
     } else {
-        if (Blind)
+        if (altfeedback)
             pline_The("tingling in your %s lessens.", hands);
         else
             Your("%s no longer glow so brightly %s.", hands, hcolor(NH_RED));
@@ -5445,7 +5521,7 @@ flash_hits_mon(struct monst *mtmp,
                 mtmp->mcansee = 0;
                 mtmp->mblinded = (tmp < 3) ? 0 : rnd(1 + 50 / tmp);
             }
-        } else if (flags.verbose && useeit) {
+        } else if (Verbose(4, flash_hits_mon) && useeit) {
             if (lev->lit)
                 pline("The flash of light shines on %s.", mon_nam(mtmp));
             else

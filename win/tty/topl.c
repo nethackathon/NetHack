@@ -124,13 +124,15 @@ redotoplin(const char *str)
     int otoplin = ttyDisplay->toplin;
 
     home();
-    if (*str & 0x80) {
-        /* kludge for the / command, the only time we ever want a */
-        /* graphics character on the top line */
-        g_putch((int) *str++);
-        ttyDisplay->curx++;
+    if (!ttyDisplay->topl_utf8) {
+        if (*str & 0x80) {
+            /* kludge for the / command, the only time we ever want a */
+            /* graphics character on the top line */
+            g_putch((int) *str++);
+            ttyDisplay->curx++;
+        }
+        end_glyphout(); /* in case message printed during graphics output */
     }
-    end_glyphout(); /* in case message printed during graphics output */
     putsyms(str);
     cl_end();
     ttyDisplay->toplin = TOPLINE_NEED_MORE;
@@ -182,8 +184,10 @@ remember_topl(void)
         cw->datlen[idx] = (short) len;
     }
     Strcpy(cw->data[idx], g.toplines);
-    *g.toplines = '\0';
-    cw->maxcol = cw->maxrow = (idx + 1) % cw->rows;
+    if (!g.program_state.in_checkpoint) {
+        *g.toplines = '\0';
+        cw->maxcol = cw->maxrow = (idx + 1) % cw->rows;
+    }
 }
 
 void
@@ -231,7 +235,7 @@ more(void)
     }
 
     if (ttyDisplay->toplin && cw->cury) {
-        docorner(1, cw->cury + 1);
+        docorner(1, cw->cury + 1, 0);
         cw->curx = cw->cury = 0;
         home();
     } else if (morc == '\033') {
@@ -269,8 +273,8 @@ update_topl(register const char *bp)
         if (ttyDisplay->toplin == TOPLINE_NEED_MORE) {
             more();
         } else if (cw->cury) { /* for toplin==TOPLINE_NON_EMPTY && cury > 1 */
-            docorner(1, cw->cury + 1); /* reset cury = 0 if redraw screen */
-            cw->curx = cw->cury = 0;   /* from home--cls() & docorner(1,n) */
+            docorner(1, cw->cury + 1, 0); /* reset cury = 0 if redraw screen */
+            cw->curx = cw->cury = 0;   /* from home--cls() & docorner(1,n,0) */
         }
     }
     remember_topl();
@@ -358,13 +362,16 @@ extern char erase_char; /* from xxxtty.c; don't need kill_char */
 
 /* returns a single keystroke; also sets 'yn_number' */
 char
-tty_yn_function(const char *query, const char *resp, char def)
+tty_yn_function(
+    const char *query,
+    const char *resp,
+    char def)
 {
     /*
      * Generic yes/no function.  'def' is the default (returned by space
      * or return; 'esc' returns 'q', or 'n', or the default, depending on
-     * what's in the string.  The 'query' string is printed before the user
-     * is asked about the string.
+     * what's in the expected-response string.  The 'query' string is
+     * printed before the user is asked about the string.
      *
      * If resp is NULL, any single character is accepted and returned.
      * If not-NULL, only characters in it are allowed (exceptions:  the
@@ -546,8 +553,8 @@ static char **snapshot_mesgs = 0;
 /* collect currently available message history data into a sequential array;
    optionally, purge that data from the active circular buffer set as we go */
 static void
-msghistory_snapshot(boolean purge) /* clear message history buffer
-                                      as we copy it */
+msghistory_snapshot(
+    boolean purge) /* clear message history buffer as we copy it */
 {
     char *mesg;
     int i, inidx, outidx;

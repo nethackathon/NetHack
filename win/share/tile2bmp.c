@@ -56,7 +56,7 @@ extern char *tilename(int, int);
 /* The numbers in the following calculation are the
    count of tiles present in:
    monsters.txt objects.txt other.txt monsters.txt */
-#define MAGICTILENO (788 + 477 + 237 + 788)
+#define MAGICTILENO (788 + 459 + 237 + 788)
 
 #if BITCOUNT == 4
 #define MAX_X 320 /* 2 per byte, 4 bits per pixel */
@@ -379,14 +379,5 @@ build_bmptile(pixel(*pixels)[TILE_X])
     }
 }
 
-/* we need a local copy of this for alloc.o and because we don't have panic() */
-unsigned
-FITSuint_(unsigned long long i, const char *file, int line){
-    unsigned ret = (unsigned)i;
-    if (ret != i) {
-        Fprintf(stderr, "Overflow at %s:%d", file, line);
-        exit(EXIT_FAILURE);
-    }
-    return (unsigned)i;
-}
+/*tile2bmp.c*/
 

@@ -1,4 +1,4 @@
-/* NetHack 3.7	files.c	$NHDT-Date: 1646314650 2022/03/03 13:37:30 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.346 $ */
+/* NetHack 3.7	files.c	$NHDT-Date: 1654069053 2022/06/01 07:37:33 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.351 $ */
 /* Copyright (c) Stichting Mathematisch Centrum, Amsterdam, 1985. */
 /*-Copyright (c) Derek S. Ray, 2015. */
 /* NetHack may be freely redistributed.  See license for details. */
@@ -165,8 +165,6 @@ static void wizkit_addinv(struct obj *);
 boolean proc_wizkit_line(char *buf);
 void read_wizkit(void);
 static FILE *fopen_sym_file(void);
-boolean proc_symset_line(char *);
-static void set_symhandling(char *, int);
 
 #ifdef SELF_RECOVER
 static boolean copy_bytes(int, int);
@@ -1363,7 +1361,7 @@ docompress_file(const char *filename, boolean uncomp)
     int f;
     unsigned ln;
 #ifdef TTY_GRAPHICS
-    boolean istty = WINDOWPORT("tty");
+    boolean istty = WINDOWPORT(tty);
 #endif
 
 #ifdef COMPRESS_EXTENSION
@@ -1985,6 +1983,48 @@ char configfile[BUFSZ];
  */
 const char *backward_compat_configfile = "nethack.cnf";
 #endif
+
+/* #saveoptions - save config options into file */
+int
+do_write_config_file(void)
+{
+    FILE *fp;
+    char tmp[BUFSZ];
+
+    if (!configfile[0]) {
+        pline("Strange, could not figure out config file name.");
+        return ECMD_OK;
+    }
+    if (flags.suppress_alert < FEATURE_NOTICE_VER(3,7,0)) {
+        pline("Warning: saveoptions is highly experimental!");
+        wait_synch();
+        pline("Some settings are not saved!");
+        wait_synch();
+        pline("All manual customization and comments are removed from the file!");
+        wait_synch();
+    }
+#define overwrite_prompt "Overwrite config file %.*s?"
+    Sprintf(tmp, overwrite_prompt, (int)(BUFSZ - sizeof overwrite_prompt - 2), configfile);
+#undef overwrite_prompt
+    if (!paranoid_query(TRUE, tmp))
+        return ECMD_OK;
+
+    fp = fopen(configfile, "w");
+    if (fp) {
+        size_t len, wrote;
+        strbuf_t buf;
+
+        strbuf_init(&buf);
+        all_options_strbuf(&buf);
+        len = strlen(buf.str);
+        wrote = fwrite(buf.str, 1, len, fp);
+        fclose(fp);
+        strbuf_empty(&buf);
+        if (wrote != len)
+            pline("An error occurred, wrote only partial data (%lu/%lu).", wrote, len);
+    }
+    return ECMD_OK;
+}
 
 /* remember the name of the file we're accessing;
    if may be used in option reject messages */
@@ -2678,7 +2718,7 @@ parse_config_line(char *origbuf)
         }
         switch_symbols(TRUE);
     } else if (match_varname(buf, "SYMBOLS", 4)) {
-        if (!parsesymbols(bufp, PRIMARY)) {
+        if (!parsesymbols(bufp, PRIMARYSET)) {
             config_error_add("Error in SYMBOLS definition '%s'", bufp);
             retval = FALSE;
         }
@@ -2796,7 +2836,7 @@ parse_config_line(char *origbuf)
     } else if (match_varname(buf, "SOUNDDIR", 8)
                || match_varname(buf, "SOUND", 5)) {
         if (!g.no_sound_notified++) {
-            config_error_add("SOUND and SOUNDDIR are not available.");
+            config_error_add("SOUND and SOUNDDIR are not available");
         }
         ; /* skip this and any further SOUND or SOUNDDIR lines
            * but leave 'retval' set to True */
@@ -2939,15 +2979,21 @@ void
 config_erradd(const char *buf)
 {
     char lineno[QBUFSZ];
+    const char *punct;
 
     if (!buf || !*buf)
         buf = "Unknown error";
 
+    /* if buf[] doesn't end in a period, exclamation point, or question mark,
+       we'll include a period (in the message, not appended to buf[]) */
+    punct = eos((char *) buf) - 1; /* eos(buf)-1 is valid; cast away const */
+    punct = index(".!?", *punct) ? "" : ".";
+
     if (!g.program_state.config_error_ready) {
         /* either very early, where pline() will use raw_print(), or
            player gave bad value when prompted by interactive 'O' command */
-        pline("%s%s.", !iflags.window_inited ? "config_error_add: " : "",
-              buf);
+        pline("%s%s%s", !iflags.window_inited ? "config_error_add: " : "",
+              buf, punct);
         wait_synch();
         return;
     }
@@ -2973,8 +3019,8 @@ config_erradd(const char *buf)
     } else
         lineno[0] = '\0';
 
-    pline("%s %s%s.", config_error_data->secure ? "Error:" : " *",
-          lineno, buf);
+    pline("%s %s%s%s", config_error_data->secure ? "Error:" : " *",
+          lineno, buf, punct);
 }
 
 int
@@ -3443,7 +3489,7 @@ fopen_sym_file(void)
 }
 
 /*
- * Returns 1 if the chose symset was found and loaded.
+ * Returns 1 if the chosen symset was found and loaded.
  *         0 if it wasn't found in the sym file or other problem.
  */
 int
@@ -3490,214 +3536,6 @@ read_sym_file(int which_set)
                                                 : "unknown");
     config_error_done();
     return 1;
-}
-
-boolean
-proc_symset_line(char *buf)
-{
-    return !((boolean) parse_sym_line(buf, g.symset_which_set));
-}
-
-/* returns 0 on error */
-int
-parse_sym_line(char *buf, int which_set)
-{
-    int val, i;
-    struct symparse *symp;
-    char *bufp, *commentp, *altp;
-
-    if (strlen(buf) >= BUFSZ)
-        buf[BUFSZ - 1] = '\0';
-    /* convert each instance of whitespace (tabs, consecutive spaces)
-       into a single space; leading and trailing spaces are stripped */
-    mungspaces(buf);
-
-    /* remove trailing comment, if any (this isn't strictly needed for
-       individual symbols, and it won't matter if "X#comment" without
-       separating space slips through; for handling or set description,
-       symbol set creator is responsible for preceding '#' with a space
-       and that comment itself doesn't contain " #") */
-    if ((commentp = rindex(buf, '#')) != 0 && commentp[-1] == ' ')
-        commentp[-1] = '\0';
-
-    /* find the '=' or ':' */
-    bufp = index(buf, '=');
-    altp = index(buf, ':');
-    if (!bufp || (altp && altp < bufp))
-        bufp = altp;
-    if (!bufp) {
-        if (strncmpi(buf, "finish", 6) == 0) {
-            /* end current graphics set */
-            if (g.chosen_symset_start)
-                g.chosen_symset_end = TRUE;
-            g.chosen_symset_start = FALSE;
-            return 1;
-        }
-        config_error_add("No \"finish\"");
-        return 0;
-    }
-    /* skip '=' and space which follows, if any */
-    ++bufp;
-    if (*bufp == ' ')
-        ++bufp;
-
-    symp = match_sym(buf);
-    if (!symp) {
-        config_error_add("Unknown sym keyword");
-        return 0;
-    }
-
-    if (!g.symset[which_set].name) {
-        /* A null symset name indicates that we're just
-           building a pick-list of possible symset
-           values from the file, so only do that */
-        if (symp->range == SYM_CONTROL) {
-            struct symsetentry *tmpsp, *lastsp;
-
-            for (lastsp = g.symset_list; lastsp; lastsp = lastsp->next)
-                if (!lastsp->next)
-                    break;
-            switch (symp->idx) {
-            case 0:
-                tmpsp = (struct symsetentry *) alloc(sizeof *tmpsp);
-                tmpsp->next = (struct symsetentry *) 0;
-                if (!lastsp)
-                    g.symset_list = tmpsp;
-                else
-                    lastsp->next = tmpsp;
-                tmpsp->idx = g.symset_count++;
-                tmpsp->name = dupstr(bufp);
-                tmpsp->desc = (char *) 0;
-                tmpsp->handling = H_UNK;
-                /* initialize restriction bits */
-                tmpsp->nocolor = 0;
-                tmpsp->primary = 0;
-                tmpsp->rogue = 0;
-                break;
-            case 2:
-                /* handler type identified */
-                tmpsp = lastsp; /* most recent symset */
-                for (i = 0; known_handling[i]; ++i)
-                    if (!strcmpi(known_handling[i], bufp)) {
-                        tmpsp->handling = i;
-                        break; /* for loop */
-                    }
-                break;
-            case 3:
-                /* description:something */
-                tmpsp = lastsp; /* most recent symset */
-                if (tmpsp && !tmpsp->desc)
-                    tmpsp->desc = dupstr(bufp);
-                break;
-            case 5:
-                /* restrictions: xxxx*/
-                tmpsp = lastsp; /* most recent symset */
-                for (i = 0; known_restrictions[i]; ++i) {
-                    if (!strcmpi(known_restrictions[i], bufp)) {
-                        switch (i) {
-                        case 0:
-                            tmpsp->primary = 1;
-                            break;
-                        case 1:
-                            tmpsp->rogue = 1;
-                            break;
-                        }
-                        break; /* while loop */
-                    }
-                }
-                break;
-            }
-        }
-        return 1;
-    }
-    if (symp->range) {
-        if (symp->range == SYM_CONTROL) {
-            switch (symp->idx) {
-            case 0:
-                /* start of symset */
-                if (!strcmpi(bufp, g.symset[which_set].name)) {
-                    /* matches desired one */
-                    g.chosen_symset_start = TRUE;
-                    /* these init_*() functions clear symset fields too */
-                    if (which_set == ROGUESET)
-                        init_rogue_symbols();
-                    else if (which_set == PRIMARY)
-                        init_primary_symbols();
-                }
-                break;
-            case 1:
-                /* finish symset */
-                if (g.chosen_symset_start)
-                    g.chosen_symset_end = TRUE;
-                g.chosen_symset_start = FALSE;
-                break;
-            case 2:
-                /* handler type identified */
-                if (g.chosen_symset_start)
-                    set_symhandling(bufp, which_set);
-                break;
-            /* case 3: (description) is ignored here */
-            case 4: /* color:off */
-                if (g.chosen_symset_start) {
-                    if (bufp) {
-                        if (!strcmpi(bufp, "true") || !strcmpi(bufp, "yes")
-                            || !strcmpi(bufp, "on"))
-                            g.symset[which_set].nocolor = 0;
-                        else if (!strcmpi(bufp, "false")
-                                 || !strcmpi(bufp, "no")
-                                 || !strcmpi(bufp, "off"))
-                            g.symset[which_set].nocolor = 1;
-                    }
-                }
-                break;
-            case 5: /* restrictions: xxxx*/
-                if (g.chosen_symset_start) {
-                    int n = 0;
-
-                    while (known_restrictions[n]) {
-                        if (!strcmpi(known_restrictions[n], bufp)) {
-                            switch (n) {
-                            case 0:
-                                g.symset[which_set].primary = 1;
-                                break;
-                            case 1:
-                                g.symset[which_set].rogue = 1;
-                                break;
-                            }
-                            break; /* while loop */
-                        }
-                        n++;
-                    }
-                }
-                break;
-            }
-        } else { /* !SYM_CONTROL */
-            val = sym_val(bufp);
-            if (g.chosen_symset_start) {
-                if (which_set == PRIMARY) {
-                    update_primary_symset(symp, val);
-                } else if (which_set == ROGUESET) {
-                    update_rogue_symset(symp, val);
-                }
-            }
-        }
-    }
-    return 1;
-}
-
-static void
-set_symhandling(char *handling, int which_set)
-{
-    int i = 0;
-
-    g.symset[which_set].handling = H_UNK;
-    while (known_handling[i]) {
-        if (!strcmpi(known_handling[i], handling)) {
-            g.symset[which_set].handling = i;
-            return;
-        }
-        i++;
-    }
 }
 
 /* ----------  END SYMSET FILE HANDLING ----------- */
@@ -3826,12 +3664,12 @@ check_recordfile(const char *dir UNUSED_if_not_OS2_CODEVIEW)
 
 /*ARGSUSED*/
 void
-paniclog(const char *type,   /* panic, impossible, trickery */
-         const char *reason) /* explanation */
+paniclog(
+    const char *type,   /* panic, impossible, trickery, [lua] */
+    const char *reason) /* explanation */
 {
 #ifdef PANICLOG
     FILE *lfile;
-    char buf[BUFSZ];
 
     if (!g.program_state.in_paniclog) {
         g.program_state.in_paniclog = 1;
@@ -3839,15 +3677,17 @@ paniclog(const char *type,   /* panic, impossible, trickery */
         if (lfile) {
 #ifdef PANICLOG_FMT2
             (void) fprintf(lfile, "%ld %s: %s %s\n",
-                           ubirthday, (g.plname ? g.plname : "(none)"),
+                           ubirthday, (g.plname[0] ? g.plname : "(none)"),
                            type, reason);
 #else
+            char buf[BUFSZ];
             time_t now = getnow();
             int uid = getuid();
             char playmode = wizard ? 'D' : discover ? 'X' : '-';
 
             (void) fprintf(lfile, "%s %08ld %06ld %d %c: %s %s\n",
-                           version_string(buf), yyyymmdd(now), hhmmss(now),
+                           version_string(buf, sizeof buf),
+                           yyyymmdd(now), hhmmss(now),
                            uid, playmode, type, reason);
 #endif /* !PANICLOG_FMT2 */
             (void) fclose(lfile);
@@ -3889,7 +3729,7 @@ recover_savefile(void)
 {
     NHFILE *gnhfp, *lnhfp, *snhfp;
     int lev, savelev, hpid, pltmpsiz, filecmc;
-    xchar levc;
+    xint16 levc;
     struct version_info version_data;
     int processed[256];
     char savename[SAVESIZE], errbuf[BUFSZ], indicator;
@@ -4028,14 +3868,14 @@ recover_savefile(void)
     processed[0] = 1;
 
     for (lev = 1; lev < 256; lev++) {
-        /* level numbers are kept in xchars in save.c, so the
+        /* level numbers are kept in xint16s in save.c, so the
          * maximum level number (for the endlevel) must be < 256
          */
         if (lev != savelev) {
             lnhfp = open_levelfile(lev, (char *) 0);
             if (lnhfp) {
                 /* any or all of these may not exist */
-                levc = (xchar) lev;
+                levc = (xint16) lev;
                 write(snhfp->fd, (genericptr_t) &levc, sizeof(levc));
                 if (!copy_bytes(lnhfp->fd, snhfp->fd)) {
                     close_nhfile(lnhfp);
@@ -4465,14 +4305,14 @@ choose_passage(int passagecnt, /* total of available passages */
             /* collect all of the N indices */
             g.context.novel.count = passagecnt;
             for (idx = 0; idx < MAXPASSAGES; idx++)
-                g.context.novel.pasg[idx] = (xchar) ((idx < passagecnt)
+                g.context.novel.pasg[idx] = (xint16) ((idx < passagecnt)
                                                    ? idx + 1 : 0);
         } else {
             /* collect MAXPASSAGES of the N indices */
             g.context.novel.count = MAXPASSAGES;
             for (idx = i = 0; i < passagecnt; ++i, --range)
                 if (range > 0 && rn2(range) < limit) {
-                    g.context.novel.pasg[idx++] = (xchar) (i + 1);
+                    g.context.novel.pasg[idx++] = (xint16) (i + 1);
                     --limit;
                 }
         }

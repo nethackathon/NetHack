@@ -280,7 +280,9 @@ dosit(void)
             pline("It's probably not a good time for a picnic...");
         } else {
             You("sit on %s.", the(xname(obj)));
-            if (!(Is_box(obj) || objects[obj->otyp].oc_material == CLOTH))
+            if (obj->otyp == CORPSE && amorphous(&mons[obj->corpsenm]))
+                pline("It's squishy...");
+            else if (!(Is_box(obj) || objects[obj->otyp].oc_material == CLOTH))
                 pline("It's not very comfortable...");
         }
     } else if (trap != 0 || (u.utrap && (u.utraptype >= TT_LAVA))) {
@@ -382,7 +384,7 @@ rndcurse(void)
     struct obj *otmp;
     static const char mal_aura[] = "feel a malignant aura surround %s.";
 
-    if (uwep && (uwep->oartifact == ART_MAGICBANE) && rn2(20)) {
+    if (u_wield_art(ART_MAGICBANE) && rn2(20)) {
         You(mal_aura, "the magic-absorbing blade");
         return;
     }

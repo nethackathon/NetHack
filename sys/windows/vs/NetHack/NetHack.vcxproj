@@ -35,7 +35,7 @@
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <OmitFramePointers>true</OmitFramePointers>
       <AdditionalIncludeDirectories>$(WinWin32Dir);$(IncDir);$(SysWindDir);$(SysShareDir);$(WinShareDir);$(LuaDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>WIN32CON;NO_TILE_C;DLB;MSWIN_GRAPHICS;SAFEPROCS;_LIB;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32CON;NO_TILE_C;DLB;MSWIN_GRAPHICS;SAFEPROCS;_LIB;HAS_STDINT_H;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
       <AdditionalDependencies>kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;winmm.lib;Winmm.lib;bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
@@ -110,7 +110,10 @@
     <ClCompile Include="$(SrcDir)music.c" />
     <ClCompile Include="$(SrcDir)nhlobj.c" />
     <ClCompile Include="$(SrcDir)nhlsel.c" />
-    <ClCompile Include="$(SrcDir)nhlua.c" />
+    <ClCompile Include="$(SrcDir)nhlua.c">
+      <DisableSpecificWarnings Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">4820;4706;4244;4245;4100;4310;4324</DisableSpecificWarnings>
+      <DisableSpecificWarnings Condition="'$(Configuration)|$(Platform)'=='Release|x64'">4820;4706;4244;4245;4100;4310;4324</DisableSpecificWarnings>
+    </ClCompile>
     <ClCompile Include="$(SrcDir)objects.c" />
     <ClCompile Include="$(SrcDir)objnam.c" />
     <ClCompile Include="$(SrcDir)options.c" />
@@ -151,6 +154,7 @@
     <ClCompile Include="$(SrcDir)trap.c" />
     <ClCompile Include="$(SrcDir)uhitm.c" />
     <ClCompile Include="$(SrcDir)u_init.c" />
+    <ClCompile Include="$(SrcDir)utf8map.c" />
     <ClCompile Include="$(SrcDir)vault.c" />
     <ClCompile Include="$(SrcDir)version.c" />
     <ClCompile Include="$(SrcDir)vision.c" />

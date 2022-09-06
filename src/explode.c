@@ -29,7 +29,7 @@ static const int explosion[3][3] = {
  */
 void
 explode(
-    int x, int y, /* explosion's location; adjacent spots are also affected */
+    coordxy x, coordxy y, /* explosion's location; adjacent spots are also affected */
     int type,     /* same as in zap.c; -(wand typ) for some WAND_CLASS */
     int dam,      /* damage amount */
     char olet,    /* object class or BURNING_OIL or MON_EXPLODE */
@@ -50,6 +50,7 @@ explode(
     char hallu_buf[BUFSZ], killr_buf[BUFSZ];
     short exploding_wand_typ = 0;
     boolean you_exploding = (olet == MON_EXPLODE && type >= 0);
+    boolean didmsg = FALSE;
 
     if (olet == WAND_CLASS) { /* retributive strike */
         /* 'type' is passed as (wand's object type * -1); save
@@ -82,6 +83,12 @@ explode(
         default:
             break;
         }
+    } else if (olet == BURNING_OIL) {
+        /* used to provide extra information to zap_over_floor() */
+        exploding_wand_typ = POT_OIL;
+    } else if (olet == SCROLL_CLASS) {
+        /* ditto */
+        exploding_wand_typ = SCR_FIRE;
     }
     /* muse_unslime: SCR_FIRE */
     if (expltype < 0) {
@@ -150,7 +157,7 @@ explode(
             break;
         case 4:
             adstr = (olet == WAND_CLASS) ? "death field"
-                                       : "disintegration field";
+                                         : "disintegration field";
             adtyp = AD_DISN;
             break;
         case 5:
@@ -318,9 +325,14 @@ explode(
             str = "explosion";
             generic = TRUE;
         }
-        if (!Deaf && olet != SCROLL_CLASS)
+        if (!Deaf && olet != SCROLL_CLASS) {
             You_hear("a blast.");
+            didmsg = TRUE;
+        }
     }
+
+    if (!Deaf && !didmsg)
+        pline("Boom!");
 
     if (dam) {
         for (i = 0; i < 3; i++) {
@@ -343,8 +355,8 @@ explode(
                 /* Affect the floor unless the player caused the explosion from
                  * inside their engulfer. */
                 if (!(u.uswallow && !g.context.mon_moving))
-                    (void) zap_over_floor((xchar) (i + x - 1),
-                                          (xchar) (j + y - 1), type,
+                    (void) zap_over_floor((coordxy) (i + x - 1),
+                                          (coordxy) (j + y - 1), type,
                                           &shopdamage, exploding_wand_typ);
 
                 mtmp = m_at(i + x - 1, j + y - 1);
@@ -366,7 +378,7 @@ explode(
                 if (engulfing_u(mtmp)) {
                     const char *adj = (char *) 0;
 
-                    if (is_animal(u.ustuck->data)) {
+                    if (digests(u.ustuck->data)) {
                         switch (adtyp) {
                         case AD_FIRE:
                             adj = "heartburn";
@@ -429,14 +441,15 @@ explode(
                     pline("%s is caught in the %s!", Monnam(mtmp), str);
                 }
 
+                if (adtyp == AD_FIRE) {
+                    (void) burnarmor(mtmp);
+                    ignite_items(mtmp->minvent);
+                }
                 idamres += destroy_mitem(mtmp, SCROLL_CLASS, (int) adtyp);
                 idamres += destroy_mitem(mtmp, SPBOOK_CLASS, (int) adtyp);
                 idamnonres += destroy_mitem(mtmp, POTION_CLASS, (int) adtyp);
-                idamnonres += destroy_mitem(mtmp, WAND_CLASS, (int) adtyp);
                 idamnonres += destroy_mitem(mtmp, RING_CLASS, (int) adtyp);
-
-                if (adtyp == AD_FIRE)
-                    ignite_items(mtmp->minvent);
+                idamnonres += destroy_mitem(mtmp, WAND_CLASS, (int) adtyp);
 
                 if (explmask[i][j] == 1) {
                     golemeffects(mtmp, (int) adtyp, dam + idamres);
@@ -509,7 +522,7 @@ explode(
     if (uhurt) {
         /* give message for any monster-induced explosion
            or player-induced one other than scroll of fire */
-        if (flags.verbose && (type < 0 || olet != SCROLL_CLASS)) {
+        if (Verbose(1, explode) && (type < 0 || olet != SCROLL_CLASS)) {
             if (do_hallu) { /* (see explanation above) */
                 do {
                     Sprintf(hallu_buf, "%s explosion",
@@ -554,9 +567,9 @@ explode(
             g.context.botl = 1;
         }
 
-	/* You resisted the damage, lets not keep that to ourselves */
-	if (uhurt == 1)
-	    monstseesu_ad(adtyp);
+        /* You resisted the damage, lets not keep that to ourselves */
+        if (uhurt == 1)
+            monstseesu_ad(adtyp);
 
         if (u.uhp <= 0 || (Upolyd && u.mh <= 0)) {
             if (Upolyd) {
@@ -613,8 +626,8 @@ explode(
 struct scatter_chain {
     struct scatter_chain *next; /* pointer to next scatter item */
     struct obj *obj;            /* pointer to the object        */
-    xchar ox;                   /* location of                  */
-    xchar oy;                   /*      item                    */
+    coordxy ox;                 /* location of                  */
+    coordxy oy;                 /*      item                    */
     schar dx;                   /* direction of                 */
     schar dy;                   /*      travel                  */
     int range;                  /* range of object              */
@@ -633,7 +646,7 @@ struct scatter_chain {
 
 /* returns number of scattered objects */
 long
-scatter(int sx, int sy,  /* location of objects to scatter */
+scatter(coordxy sx, coordxy sy,  /* location of objects to scatter */
         int blastforce,  /* force behind the scattering */
         unsigned int scflags,
         struct obj *obj) /* only scatter this obj        */
@@ -714,8 +727,8 @@ scatter(int sx, int sy,  /* location of objects to scatter */
             /* 1 in 10 chance of destruction of obj; glass, egg destruction */
         } else if ((scflags & MAY_DESTROY) != 0
                    && (!rn2(10) || (objects[otmp->otyp].oc_material == GLASS
-                                    || is_egg(otmp->otyp)))) {
-            if (breaks(otmp, (xchar) sx, (xchar) sy))
+                                    || otmp->otyp == EGG))) {
+            if (breaks(otmp, (coordxy) sx, (coordxy) sy))
                 used_up = TRUE;
         }
 
@@ -800,7 +813,7 @@ scatter(int sx, int sy,  /* location of objects to scatter */
         }
     }
     for (stmp = schain; stmp; stmp = stmp2) {
-        int x, y;
+        coordxy x, y;
         boolean obj_left_shop = FALSE;
 
         stmp2 = stmp->next;
@@ -861,7 +874,7 @@ scatter(int sx, int sy,  /* location of objects to scatter */
  * For now, just perform a "regular" explosion.
  */
 void
-splatter_burning_oil(int x, int y, boolean diluted_oil)
+splatter_burning_oil(coordxy x, coordxy y, boolean diluted_oil)
 {
     int dmg = d(diluted_oil ? 3 : 4, 4);
 
@@ -873,7 +886,7 @@ splatter_burning_oil(int x, int y, boolean diluted_oil)
 /* lit potion of oil is exploding; extinguish it as a light source before
    possibly killing the hero and attempting to save bones */
 void
-explode_oil(struct obj *obj, int x, int y)
+explode_oil(struct obj *obj, coordxy x, coordxy y)
 {
     boolean diluted_oil = obj->odiluted;
 

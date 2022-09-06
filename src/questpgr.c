@@ -1,4 +1,4 @@
-/* NetHack 3.7	questpgr.c	$NHDT-Date: 1596498201 2020/08/03 23:43:21 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.72 $ */
+/* NetHack 3.7	questpgr.c	$NHDT-Date: 1655065145 2022/06/12 20:19:05 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.79 $ */
 /*      Copyright 1991, M. Stephenson                             */
 /* NetHack may be freely redistributed.  See license for details. */
 
@@ -24,7 +24,7 @@ static void convert_line(char *,char *);
 static void deliver_by_pline(const char *);
 static void deliver_by_window(const char *, int);
 static boolean skip_pager(boolean);
-static boolean com_pager_core(const char *, const char *, boolean);
+static boolean com_pager_core(const char *, const char *, boolean, char **);
 
 short
 quest_info(int typ)
@@ -143,12 +143,61 @@ homebase(void) /* return your role leader's location */
     return g.urole.homebase;
 }
 
+/* returns 1 if nemesis death message mentions noxious fumes, otherwise 0;
+   does not display the message */
+int
+stinky_nemesis(struct monst *mon)
+{
+    char *mesg = 0;
+    int res = 0;
+
+#if 0
+    /* get the quest text for dying nemesis; don't assume that mon is
+       hero's own role's nemesis (overkill since m_detach() and nemdead()
+       both make that assumption--valid for normal play but not necessarily
+       valid for wizard mode) */
+    int r, mndx = monsndx(mon->data);
+    for (r = 0; roles[r].name.m || roles[r].name.f; ++r)
+        if (roles[r].neminum == mndx) {
+            (void) com_pager_core(roles[r].filecode, "killed_nemesis",
+                                  FALSE, &mesg);
+            break;
+        }
+#else
+    nhUse(mon);
+    /* since nemdead() just gave the message for hero's nemesis even if 'mon'
+       is some other role's nemesis (feasible in wizard mode), base any gas
+       cloud on the text that was shown even if not appropriate for 'mon' */
+    (void) com_pager_core(g.urole.filecode, "killed_nemesis", FALSE, &mesg);
+#endif
+
+    /* this is somewhat fragile; it assumes that when both (noxious or
+       poisonous or toxic) and (gas or fumes) are present, the latter
+       refers to the former rather than to something unrelated; it does
+       make sure that fumes occurs after noxious rather than before */
+    if (mesg) {
+        char *p;
+
+        /* change newlines into spaces to cope with "...noxious\nfumes..." */
+        (void) strNsubst(mesg, "\n", " ", 0);
+
+        if (((p = strstri(mesg, "noxious")) != 0
+             || (p = strstri(mesg, "poisonous")) != 0
+             || (p = strstri(mesg, "toxic")) != 0)
+            && (strstri(p, " gas") || strstri(p, " fumes")))
+            res = 1;
+
+        free((genericptr_t) mesg);
+    }
+    return res;
+}
+
 /* replace deity, leader, nemesis, or artifact name with pronoun;
    overwrites cvt_buf[] */
 static void
-qtext_pronoun(char who,   /* 'd' => deity, 'l' => leader, 'n' => nemesis,
-                             'o' => artifact */
-              char which) /* 'h'|'H'|'i'|'I'|'j'|'J' */
+qtext_pronoun(
+    char who,   /* 'd' => deity, 'l' => leader, 'n' => nemesis, 'o' => arti */
+    char which) /* 'h'|'H'|'i'|'I'|'j'|'J' */
 {
     const char *pnoun;
     int godgend;
@@ -192,7 +241,8 @@ convert_arg(char c)
         str = g.plname;
         break;
     case 'c':
-        str = (flags.female && g.urole.name.f) ? g.urole.name.f : g.urole.name.m;
+        str = (flags.female && g.urole.name.f) ? g.urole.name.f
+                                               : g.urole.name.m;
         break;
     case 'r':
         str = rank_of(u.ulevel, Role_switch, flags.female);
@@ -368,20 +418,14 @@ convert_line(char *in_line, char *out_line)
 static void
 deliver_by_pline(const char *str)
 {
-    const char *msgp = str;
-    const char *msgend = eos((char *)str);
     char in_line[BUFSZ], out_line[BUFSZ];
+    const char *msgp = str, *msgend = eos((char *) str);
 
-    while (msgp && msgp != msgend) {
-        int i = 0;
-        while (*msgp != '\0' && *msgp != '\n' && (i < BUFSZ-2)) {
-            in_line[i] = *msgp;
-            i++;
-            msgp++;
-        }
-        if (*msgp == '\n')
-            msgp++;
-        in_line[i] = '\0';
+    while (msgp < msgend) {
+        /* copynchars() will stop at newline if it finds one */
+        copynchars(in_line, msgp, (int) sizeof in_line - 1);
+        msgp += strlen(in_line) + 1;
+
         convert_line(in_line, out_line);
         pline("%s", out_line);
     }
@@ -390,21 +434,15 @@ deliver_by_pline(const char *str)
 static void
 deliver_by_window(const char *msg, int how)
 {
-    const char *msgp = msg;
-    const char *msgend = eos((char *)msg);
     char in_line[BUFSZ], out_line[BUFSZ];
+    const char *msgp = msg, *msgend = eos((char *) msg);
     winid datawin = create_nhwindow(how);
 
-    while (msgp && msgp != msgend) {
-        int i = 0;
-        while (*msgp != '\0' && *msgp != '\n' && (i < BUFSZ-2)) {
-            in_line[i] = *msgp;
-            i++;
-            msgp++;
-        }
-        if (*msgp == '\n')
-            msgp++;
-        in_line[i] = '\0';
+    while (msgp < msgend) {
+        /* copynchars() will stop at newline if it finds one */
+        copynchars(in_line, msgp, (int) sizeof in_line - 1);
+        msgp += strlen(in_line) + 1;
+
         convert_line(in_line, out_line);
         putstr(datawin, 0, out_line);
     }
@@ -423,7 +461,11 @@ skip_pager(boolean common UNUSED)
 }
 
 static boolean
-com_pager_core(const char *section, const char *msgid, boolean showerror)
+com_pager_core(
+    const char *section,
+    const char *msgid,
+    boolean showerror,
+    char **rawtext)
 {
     static const char *const howtoput[] = {
         "pline", "window", "text", "menu", "default", NULL
@@ -433,11 +475,12 @@ com_pager_core(const char *section, const char *msgid, boolean showerror)
     lua_State *L;
     char *text = NULL, *synopsis = NULL, *fallback_msgid = NULL;
     boolean res = FALSE;
+    nhl_sandbox_info sbi = {NHL_SB_SAFE, 0, 0, 0};
 
     if (skip_pager(TRUE))
         return FALSE;
 
-    L = nhl_init();
+    L = nhl_init(&sbi);
     if (!L) {
         if (showerror)
             impossible("com_pager: nhl_init() failed");
@@ -493,8 +536,13 @@ com_pager_core(const char *section, const char *msgid, boolean showerror)
         goto compagerdone;
     }
 
-    synopsis = get_table_str_opt(L, "synopsis", NULL);
     text = get_table_str_opt(L, "text", NULL);
+    if (rawtext) {
+        *rawtext = dupstr(text);
+        res = TRUE;
+        goto compagerdone;
+    }
+    synopsis = get_table_str_opt(L, "synopsis", NULL);
     output = howtoput2i[get_table_option(L, "output", "default", howtoput)];
 
     if (!text) {
@@ -506,7 +554,7 @@ com_pager_core(const char *section, const char *msgid, boolean showerror)
         if (nelems < 2) {
             if (showerror)
                 impossible(
-              "com_pager: questtext[%s][%s] in %s in not an array of strings",
+              "com_pager: questtext[%s][%s] in %s is not an array of strings",
                            section, fallback_msgid ? fallback_msgid : msgid,
                            QTEXT_FILE);
             goto compagerdone;
@@ -517,8 +565,25 @@ com_pager_core(const char *section, const char *msgid, boolean showerror)
         text = dupstr(luaL_checkstring(L, -1));
     }
 
-    if (output == 0 && (index(text, '\n') || (strlen(text) >= (BUFSZ - 1))))
+    /* switch from by_pline to by_window if line has multiple segments or
+       is unreasonably long (the latter ought to checked after formatting
+       conversions rather than before...) */
+    if (output == 0 && (index(text, '\n') || strlen(text) >= BUFSZ - 1)) {
         output = 2;
+
+        /*
+         * FIXME:  should update quest.lua to include proper synopsis line
+         * for any item subject to having its delivery converted to by_window.
+         */
+        if (!synopsis) {
+            char tmpbuf[BUFSZ];
+
+            Sprintf(tmpbuf, "[%.*s]", BUFSZ - 1 - 2, text);
+            /* change every newline character to a space */
+            (void) strNsubst(tmpbuf, "\n", " ", 0);
+            synopsis = dupstr(tmpbuf);
+        }
+    }
 
     if (output == 0 || output == 1)
         deliver_by_pline(text);
@@ -554,14 +619,14 @@ com_pager_core(const char *section, const char *msgid, boolean showerror)
 void
 com_pager(const char *msgid)
 {
-    com_pager_core("common", msgid, TRUE);
+    (void) com_pager_core("common", msgid, TRUE, (char **) 0);
 }
 
 void
 qt_pager(const char *msgid)
 {
-    if (!com_pager_core(g.urole.filecode, msgid, FALSE))
-        com_pager_core("common", msgid, TRUE);
+    if (!com_pager_core(g.urole.filecode, msgid, FALSE, (char **) 0))
+        (void) com_pager_core("common", msgid, TRUE, (char **) 0);
 }
 
 struct permonst *
@@ -585,22 +650,9 @@ qt_montype(void)
 void
 deliver_splev_message(void)
 {
-    char *str, *nl, in_line[BUFSZ], out_line[BUFSZ];
-
     /* there's no provision for delivering via window instead of pline */
     if (g.lev_message) {
-        /* lev_message can span multiple lines using embedded newline chars;
-           any segments too long to fit within in_line[] will be truncated */
-        for (str = g.lev_message; *str; str = nl + 1) {
-            /* copying will stop at newline if one is present */
-            copynchars(in_line, str, (int) (sizeof in_line) - 1);
-
-            convert_line(in_line, out_line);
-            pline("%s", out_line);
-
-            if ((nl = index(str, '\n')) == 0)
-                break; /* done if no newline */
-        }
+        deliver_by_pline(g.lev_message);
 
         free((genericptr_t) g.lev_message);
         g.lev_message = NULL;

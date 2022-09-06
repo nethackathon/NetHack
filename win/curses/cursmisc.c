@@ -12,6 +12,10 @@
 
 #include <ctype.h>
 
+#ifndef A_ITALIC
+#define A_ITALIC A_UNDERLINE
+#endif
+
 /* Misc. curses interface functions */
 
 /* Private declarations */
@@ -650,6 +654,7 @@ curses_view_file(const char *filename, boolean must_exist)
     char buf[BUFSZ];
     menu_item *selected = NULL;
     dlb *fp = dlb_fopen(filename, "r");
+    int clr = 0;
 
     if (fp == NULL) {
         if (must_exist)
@@ -663,7 +668,7 @@ curses_view_file(const char *filename, boolean must_exist)
 
     while (dlb_fgets(buf, BUFSZ, fp) != NULL) {
         curses_add_menu(wid, &nul_glyphinfo, &Id, 0, 0,
-                        A_NORMAL, buf, FALSE);
+                        A_NORMAL, clr, buf, FALSE);
     }
 
     dlb_fclose(fp);
@@ -702,9 +707,11 @@ curses_get_count(int first_digit)
        curses's message window will display that in count window instead */
     current_char = get_count(NULL, (char) first_digit,
                              /* 0L => no limit on value unless it wraps
-                              * to negative;
-                              * FALSE => suppress from message history */
-                             0L, &current_count, FALSE);
+                                to negative */
+                             0L, &current_count,
+                             /* default: don't put into message history,
+                                don't echo until second digit entered */
+                             GC_NOFLAGS);
 
     ungetch(current_char);
     if (current_char == '\033') {     /* Cancelled with escape */
@@ -744,6 +751,9 @@ curses_convert_attr(int attr)
         break;
     case ATR_INVERSE:
         curses_attr = A_REVERSE;
+        break;
+    case ATR_ITALIC:
+        curses_attr = A_ITALIC;
         break;
     default:
         curses_attr = A_NORMAL;
@@ -971,7 +981,7 @@ event, or the first non-mouse key event in the case of mouse
 movement. */
 
 int
-curses_get_mouse(int *mousex, int *mousey, int *mod)
+curses_get_mouse(coordxy *mousex, coordxy *mousey, int *mod)
 {
     int key = '\033';
 

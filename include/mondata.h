@@ -38,7 +38,8 @@
 #define is_floater(ptr) ((ptr)->mlet == S_EYE || (ptr)->mlet == S_LIGHT)
 /* clinger: piercers, mimics, wumpus -- generally don't fall down holes */
 #define is_clinger(ptr) (((ptr)->mflags1 & M1_CLING) != 0L)
-#define grounded(ptr) (!is_flyer(ptr) && !is_floater(ptr) && !is_clinger(ptr))
+#define grounded(ptr) (!is_flyer(ptr) && !is_floater(ptr) \
+                       && (!is_clinger(ptr) || !has_ceiling(&u.uz)))
 #define is_swimmer(ptr) (((ptr)->mflags1 & M1_SWIM) != 0L)
 #define breathless(ptr) (((ptr)->mflags1 & M1_BREATHLESS) != 0L)
 #define amphibious(ptr) \
@@ -85,6 +86,8 @@
 #define is_wooden(ptr) ((ptr) == &mons[PM_WOOD_GOLEM])
 #define thick_skinned(ptr) (((ptr)->mflags1 & M1_THICK_HIDE) != 0L)
 #define hug_throttles(ptr) ((ptr) == &mons[PM_ROPE_GOLEM])
+#define digests(ptr) dmgtype_fromattack((ptr), AD_DGST, AT_ENGL) /* purple w*/
+#define enfolds(ptr) dmgtype_fromattack((ptr), AD_WRAP, AT_ENGL) /* 't' */
 #define slimeproof(ptr) \
     ((ptr) == &mons[PM_GREEN_SLIME] || flaming(ptr) || noncorporeal(ptr))
 #define lays_eggs(ptr) (((ptr)->mflags1 & M1_OVIPAROUS) != 0L)
@@ -266,9 +269,9 @@
    horses can be tamed by always-veggy food or lichen corpses but
    not tamed or pacified by other corpses or tins of veggy critters */
 #define befriend_with_obj(ptr, obj) \
-    ((( (ptr) == &mons[PM_MONKEY] || (ptr) == &mons[PM_APE] ) && (obj)->otyp == BANANA ) \
-     || ((ptr) == &mons[PM_VLAD_THE_IMPALER] && (obj)->otyp == CARROT) \
-     || (is_domestic(ptr) && (obj)->oclass == FOOD_CLASS                  \
+    (((ptr) == &mons[PM_MONKEY] || (ptr) == &mons[PM_APE])               \
+     ? (obj)->otyp == BANANA                                             \
+     : (is_domestic(ptr) && (obj)->oclass == FOOD_CLASS                  \
         && ((ptr)->mlet != S_UNICORN                                     \
             || objects[(obj)->otyp].oc_material == VEGGY                 \
             || ((obj)->otyp == CORPSE && (obj)->corpsenm == PM_LICHEN))))

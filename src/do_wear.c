@@ -1,4 +1,4 @@
-/* NetHack 3.7	do_wear.c	$NHDT-Date: 1605578866 2020/11/17 02:07:46 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.136 $ */
+/* NetHack 3.7	do_wear.c	$NHDT-Date: 1650875489 2022/04/25 08:31:29 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.156 $ */
 /* Copyright (c) Stichting Mathematisch Centrum, Amsterdam, 1985. */
 /*-Copyright (c) Robert Patrick Rankin, 2012. */
 /* NetHack may be freely redistributed.  See license for details. */
@@ -32,6 +32,7 @@ static int Shirt_on(void);
 static void dragon_armor_handling(struct obj *, boolean, boolean);
 static void Amulet_on(void);
 static void learnring(struct obj *, boolean);
+static void adjust_attrib(struct obj *, int, int);
 static void Ring_off_or_gone(struct obj *, boolean);
 static int select_off(struct obj *);
 static struct obj *do_takeoff(void);
@@ -60,7 +61,7 @@ fingers_or_gloves(boolean check_gloves)
 void
 off_msg(struct obj *otmp)
 {
-    if (flags.verbose)
+    if (Verbose(0, off_msg))
         You("were wearing %s.", doname(otmp));
 }
 
@@ -68,7 +69,7 @@ off_msg(struct obj *otmp)
 static void
 on_msg(struct obj *otmp)
 {
-    if (flags.verbose) {
+    if (Verbose(0, on_msg)) {
         char how[BUFSZ];
         /* call xname() before obj_is_pname(); formatting obj's name
            might set obj->dknown and that affects the pname test */
@@ -86,10 +87,10 @@ on_msg(struct obj *otmp)
    give feedback and discover it iff stealth state is changing */
 static
 void
-toggle_stealth(struct obj *obj,
-               long oldprop, /* prop[].extrinsic, with obj->owornmask
-                                stripped by caller */
-               boolean on)
+toggle_stealth(
+    struct obj *obj,
+    long oldprop, /* prop[].extrinsic, with obj->owornmask pre-stripped */
+    boolean on)
 {
     if (on ? g.initial_don : g.context.takeoff.cancelled_don)
         return;
@@ -1079,11 +1080,29 @@ learnring(struct obj *ring, boolean observed)
     }
 }
 
+static void
+adjust_attrib(struct obj *obj, int which, int val)
+{
+    int old_attrib;
+    boolean observable;
+
+    old_attrib = ACURR(which);
+    ABON(which) += val;
+    observable = (old_attrib != ACURR(which));
+    /* if didn't change, usually means ring is +0 but might
+        be because nonzero couldn't go below min or above max;
+        learn +0 enchantment if attribute value is not stuck
+        at a limit [and ring has been seen and its type is
+        already discovered, both handled by learnring()] */
+    if (observable || !extremeattr(which))
+        learnring(obj, observable);
+    g.context.botl = 1;
+}
+
 void
 Ring_on(register struct obj *obj)
 {
     long oldprop = u.uprops[objects[obj->otyp].oc_oprop].extrinsic;
-    int old_attrib, which;
     boolean observable;
 
     /* make sure ring isn't wielded; can't use remove_worn_item()
@@ -1154,25 +1173,13 @@ Ring_on(register struct obj *obj)
         }
         break;
     case RIN_GAIN_STRENGTH:
-        which = A_STR;
-        goto adjust_attrib;
+        adjust_attrib(obj, A_STR, obj->spe);
+        break;
     case RIN_GAIN_CONSTITUTION:
-        which = A_CON;
-        goto adjust_attrib;
+        adjust_attrib(obj, A_CON, obj->spe);
+        break;
     case RIN_ADORNMENT:
-        which = A_CHA;
- adjust_attrib:
-        old_attrib = ACURR(which);
-        ABON(which) += obj->spe;
-        observable = (old_attrib != ACURR(which));
-        /* if didn't change, usually means ring is +0 but might
-           be because nonzero couldn't go below min or above max;
-           learn +0 enchantment if attribute value is not stuck
-           at a limit [and ring has been seen and its type is
-           already discovered, both handled by learnring()] */
-        if (observable || !extremeattr(which))
-            learnring(obj, observable);
-        g.context.botl = 1;
+        adjust_attrib(obj, A_CHA, obj->spe);
         break;
     case RIN_INCREASE_ACCURACY: /* KMH */
         u.uhitinc += obj->spe;
@@ -1199,7 +1206,6 @@ static void
 Ring_off_or_gone(register struct obj *obj, boolean gone)
 {
     long mask = (obj->owornmask & W_RING);
-    int old_attrib, which;
     boolean observable;
 
     g.context.takeoff.mask &= ~mask;
@@ -1266,21 +1272,13 @@ Ring_off_or_gone(register struct obj *obj, boolean gone)
         }
         break;
     case RIN_GAIN_STRENGTH:
-        which = A_STR;
-        goto adjust_attrib;
+        adjust_attrib(obj, A_STR, -obj->spe);
+        break;
     case RIN_GAIN_CONSTITUTION:
-        which = A_CON;
-        goto adjust_attrib;
+        adjust_attrib(obj, A_CON, -obj->spe);
+        break;
     case RIN_ADORNMENT:
-        which = A_CHA;
- adjust_attrib:
-        old_attrib = ACURR(which);
-        ABON(which) -= obj->spe;
-        observable = (old_attrib != ACURR(which));
-        /* same criteria as Ring_on() */
-        if (observable || !extremeattr(which))
-            learnring(obj, observable);
-        g.context.botl = 1;
+        adjust_attrib(obj, A_CHA, -obj->spe);
         break;
     case RIN_INCREASE_ACCURACY: /* KMH */
         u.uhitinc -= obj->spe;
@@ -1330,7 +1328,7 @@ Blindf_on(struct obj *otmp)
 
     if (Blind && !already_blind) {
         changed = TRUE;
-        if (flags.verbose)
+        if (Verbose(0, Blindf_on))
             You_cant("see any more.");
         /* set ball&chain variables before the hero goes blind */
         if (Punished)
@@ -1700,7 +1698,7 @@ dotakeoff(void)
             pline("Not wearing any armor or accessories.");
         return ECMD_OK;
     }
-    if (Narmorpieces != 1 || ParanoidRemove)
+    if (Narmorpieces != 1 || ParanoidRemove || cmdq_peek(CQ_CANNED))
         otmp = getobj("take off", takeoff_ok, GETOBJ_NOFLAGS);
     if (!otmp)
         return ECMD_CANCEL;
@@ -1719,7 +1717,7 @@ doremring(void)
         pline("Not wearing any accessories or armor.");
         return ECMD_OK;
     }
-    if (Naccessories != 1 || ParanoidRemove)
+    if (Naccessories != 1 || ParanoidRemove || cmdq_peek(CQ_CANNED))
         otmp = getobj("remove", remove_ok, GETOBJ_NOFLAGS);
     if (!otmp)
         return ECMD_CANCEL;
@@ -2107,7 +2105,7 @@ accessory_or_armor_on(struct obj *obj)
                     Sprintf(qbuf, "Which %s%s, Right or Left?",
                             humanoid(g.youmonst.data) ? "ring-" : "",
                             body_part(FINGER));
-                    answer = yn_function(qbuf, "rl", '\0');
+                    answer = yn_function(qbuf, "rl", '\0', TRUE);
                     switch (answer) {
                     case '\0':
                     case '\033':
@@ -2380,13 +2378,13 @@ glibr(void)
             otmp = uleft;
             Ring_off(uleft);
             dropx(otmp);
-            cmdq_clear();
+            cmdq_clear(CQ_CANNED);
         }
         if (rightfall) {
             otmp = uright;
             Ring_off(uright);
             dropx(otmp);
-            cmdq_clear();
+            cmdq_clear(CQ_CANNED);
         }
     }
 
@@ -2407,7 +2405,7 @@ glibr(void)
         xfl++;
         wastwoweap = TRUE;
         setuswapwep((struct obj *) 0); /* clears u.twoweap */
-        cmdq_clear();
+        cmdq_clear(CQ_CANNED);
         if (canletgo(otmp, ""))
             dropx(otmp);
     }
@@ -2443,7 +2441,7 @@ glibr(void)
         /* xfl++; */
         otmp->quan = savequan;
         setuwep((struct obj *) 0);
-        cmdq_clear();
+        cmdq_clear(CQ_CANNED);
         if (canletgo(otmp, ""))
             dropx(otmp);
     }
@@ -2655,7 +2653,7 @@ do_takeoff(void)
             if (was_twoweap)
                 You("are no longer wielding either weapon.");
             else
-                You("are empty %s.", body_part(HANDED));
+                You("are %s.", empty_handed());
         }
     } else if (doff->what == W_SWAPWEP) {
         setuswapwep((struct obj *) 0);
@@ -2825,8 +2823,8 @@ doddoremarm(void)
         You("continue %s.", g.context.takeoff.disrobing);
         set_occupation(take_off, g.context.takeoff.disrobing, 0);
         return ECMD_OK;
-    } else if (!uwep && !uswapwep && !uquiver && !uamul && !ublindf && !uleft
-               && !uright && !wearing_armor()) {
+    } else if (!uwep && !uswapwep && !uquiver && !uamul && !ublindf
+               && !uleft && !uright && !wearing_armor()) {
         You("are not wearing anything.");
         return ECMD_OK;
     }
@@ -2852,6 +2850,36 @@ doddoremarm(void)
      * disrobe.
      */
     return ECMD_OK;
+}
+
+/* #altunwield - just unwield alternate weapon, item-action '-' when picking
+   uswapwep from context-sensitive inventory */
+int
+remarm_swapwep(void)
+{
+    struct _cmd_queue cq, *cmdq;
+    unsigned oldbknown;
+
+    if ((cmdq = cmdq_pop()) != 0) {
+        /* '-' uswapwep item-action picked from context-sensitive invent */
+        cq = *cmdq;
+        free(cmdq);
+    } else {
+        cq.typ = CMDQ_KEY;
+        cq.key = '\0'; /* something other than '-' */
+    }
+    if (cq.typ != CMDQ_KEY || cq.key != '-' || !uswapwep)
+        return ECMD_FAIL;
+
+    oldbknown = uswapwep->bknown; /* when deciding whether this command
+                                   * has done something that takes time,
+                                   * behave as if a cursed secondary weapon
+                                   * can't be unwielded even though things
+                                   * don't work that way... */
+    reset_remarm();
+    g.context.takeoff.what = g.context.takeoff.mask = W_SWAPWEP;
+    (void) do_takeoff();
+    return (!uswapwep || uswapwep->bknown != oldbknown) ? ECMD_TIME : ECMD_OK;
 }
 
 static int

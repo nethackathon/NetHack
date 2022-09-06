@@ -9,7 +9,7 @@
 #define ALGN_SINNED (-4) /* worse than strayed (-1..-3) */
 #define ALGN_PIOUS 14    /* better than fervent (9..13) */
 
-static boolean histemple_at(struct monst *, xchar, xchar);
+static boolean histemple_at(struct monst *, coordxy, coordxy);
 static boolean has_shrine(struct monst *);
 
 void
@@ -40,9 +40,9 @@ free_epri(struct monst *mtmp)
 int
 move_special(struct monst *mtmp, boolean in_his_shop, schar appr,
              boolean uondoor, boolean avoid,
-             xchar omx, xchar omy, xchar gx, xchar gy)
+             coordxy omx, coordxy omy, coordxy gx, coordxy gy)
 {
-    register xchar nx, ny, nix, niy;
+    register coordxy nx, ny, nix, niy;
     register schar i;
     schar chcnt, cnt;
     coord poss[9];
@@ -146,7 +146,7 @@ temple_occupied(char *array)
 }
 
 static boolean
-histemple_at(struct monst *priest, xchar x, xchar y)
+histemple_at(struct monst *priest, coordxy x, coordxy y)
 {
     return (boolean) (priest && priest->ispriest
                       && (EPRI(priest)->shroom == *in_rooms(x, y, TEMPLE))
@@ -172,7 +172,7 @@ inhistemple(struct monst *priest)
 int
 pri_move(struct monst *priest)
 {
-    register xchar gx, gy, omx, omy;
+    register coordxy gx, gy, omx, omy;
     schar temple;
     boolean avoid = TRUE;
 
@@ -245,7 +245,7 @@ priestini(
         EPRI(priest)->shrpos.x = sx;
         EPRI(priest)->shrpos.y = sy;
         assign_level(&(EPRI(priest)->shrlevel), lvl);
-        priest->mtrapseen = ~0; /* traps are known */
+        mon_learns_traps(priest, ALL_TRAPS); /* traps are known */
         priest->mpeaceful = 1;
         priest->ispriest = 1;
         priest->isminion = 0;
@@ -527,7 +527,7 @@ intemple(int roomno)
                 You("sense a presence close by!");
             mtmp->mpeaceful = 0;
             set_malign(mtmp);
-            if (flags.verbose)
+            if (Verbose(3, intemple))
                 You("are frightened to death, and unable to move.");
             nomul(-3);
             g.multi_reason = "being terrified of a ghost";
@@ -670,7 +670,7 @@ priest_talk(struct monst *priest)
 }
 
 struct monst *
-mk_roamer(struct permonst *ptr, aligntyp alignment, xchar x, xchar y,
+mk_roamer(struct permonst *ptr, aligntyp alignment, coordxy x, coordxy y,
           boolean peaceful)
 {
     register struct monst *roamer;
@@ -691,7 +691,7 @@ mk_roamer(struct permonst *ptr, aligntyp alignment, xchar x, xchar y,
     EMIN(roamer)->renegade = (coaligned && !peaceful);
     roamer->ispriest = 0;
     roamer->isminion = 1;
-    roamer->mtrapseen = ~0; /* traps are known */
+    mon_learns_traps(roamer, ALL_TRAPS); /* traps are known */
     roamer->mpeaceful = peaceful;
     roamer->msleeping = 0;
     set_malign(roamer); /* peaceful may have changed */
@@ -719,7 +719,7 @@ reset_hostility(struct monst *roamer)
 boolean
 in_your_sanctuary(
     struct monst *mon, /* if non-null, <mx,my> overrides <x,y> */
-    xchar x, xchar y)
+    coordxy x, coordxy y)
 {
     register char roomno;
     register struct monst *priest;
@@ -744,7 +744,8 @@ in_your_sanctuary(
 void
 ghod_hitsu(struct monst *priest)
 {
-    int x, y, ax, ay, roomno = (int) temple_occupied(u.urooms);
+    coordxy x, y, ax, ay;
+    int roomno = (int) temple_occupied(u.urooms);
     struct mkroom *troom;
 
     if (!roomno || !has_shrine(priest))
@@ -808,7 +809,7 @@ ghod_hitsu(struct monst *priest)
         break;
     }
 
-    buzz(-10 - (AD_ELEC - 1), 6, x, y, sgn(g.tbx),
+    buzz(BZ_M_SPELL(BZ_OFS_AD(AD_ELEC)), 6, x, y, sgn(g.tbx),
          sgn(g.tby)); /* bolt of lightning */
     exercise(A_WIS, FALSE);
 }

@@ -36,7 +36,7 @@ struct obj {
 
     struct obj *cobj; /* contents list for containers */
     unsigned o_id;
-    xchar ox, oy;
+    coordxy ox, oy;
     short otyp; /* object class number */
     unsigned owt;
     long quan; /* number of items */
@@ -66,7 +66,7 @@ struct obj {
     char invlet;    /* designation in inventory */
     char oartifact; /* artifact array index */
 
-    xchar where;        /* where the object thinks it is */
+    xint8 where;        /* where the object thinks it is */
 #define OBJ_FREE 0      /* object not attached to anything */
 #define OBJ_FLOOR 1     /* object on floor */
 #define OBJ_CONTAINED 2 /* object in a container */
@@ -77,7 +77,7 @@ struct obj {
 #define OBJ_ONBILL 7    /* object on shk bill */
 #define OBJ_LUAFREE 8   /* object has been dealloc'd, but is ref'd by lua */
 #define NOBJ_STATES 9
-    xchar timed; /* # of fuses (timers) attached to this obj */
+    xint16 timed; /* # of fuses (timers) attached to this obj */
 
     Bitfield(cursed, 1);
     Bitfield(blessed, 1);
@@ -140,8 +140,8 @@ struct obj {
                             * overloaded for the destination of migrating
                             * objects (which can't be worn at same time) */
     unsigned lua_ref_cnt;  /* # of lua script references for this object */
-    xchar omigr_from_dnum; /* where obj is migrating from */
-    xchar omigr_from_dlevel; /* where obj is migrating from */
+    xint16 omigr_from_dnum; /* where obj is migrating from */
+    xint16 omigr_from_dlevel; /* where obj is migrating from */
     struct oextra *oextra; /* pointer to oextra struct */
 };
 
@@ -284,13 +284,6 @@ struct obj {
 #define Is_pudding(o) \
     (o->otyp == GLOB_OF_GRAY_OOZE || o->otyp == GLOB_OF_BROWN_PUDDING   \
      || o->otyp == GLOB_OF_GREEN_SLIME || o->otyp == GLOB_OF_BLACK_PUDDING)
-#define is_egg(otyp) \
-    (otyp == BLACK_EGG || otyp == BLUE_EGG   \
-     || otyp == B_BLUE_EGG || otyp == RED_EGG \
-     || otyp == PINK_EGG || otyp == ORANGE_EGG || otyp == B_PINK_EGG \
-     || otyp == GREEN_EGG || otyp == BLUE_GREEN_EGG || otyp == B_GREEN_EGG \
-     || otyp == B_BLUE_GREEN_EGG || otyp == BROWN_EGG || otyp == GRAY_EGG \
-     || otyp == YELLOW_EGG || otyp == EGG)
 
 /* Containers */
 #define carried(o) ((o)->where == OBJ_INVENT)
@@ -300,12 +293,12 @@ struct obj {
      (o)->cobj != (struct obj *) 0)
 #define Is_container(o) ((o)->otyp >= LARGE_BOX && (o)->otyp <= BAG_OF_TRICKS)
 #define Is_box(o) ((o)->otyp == LARGE_BOX || (o)->otyp == CHEST)
-#define Is_mbag(o) ((o)->otyp == BAG_OF_HOLDING || (o)->otyp == BAG_OF_TRICKS || (o)->otyp == FABERGE_EGG)
+#define Is_mbag(o) ((o)->otyp == BAG_OF_HOLDING || (o)->otyp == BAG_OF_TRICKS)
 #define SchroedingersBox(o) ((o)->otyp == LARGE_BOX && (o)->spe == 1)
 /* usually waterproof; random chance to be subjected to leakage if cursed;
    excludes statues, which aren't vulernable to water even when cursed */
 #define Waterproof_container(o) \
-    ((o)->otyp == OILSKIN_SACK || (o)->otyp == ICE_BOX || (o)->otyp == FABERGE_EGG || Is_box(o))
+    ((o)->otyp == OILSKIN_SACK || (o)->otyp == ICE_BOX || Is_box(o))
 
 /* dragon gear */
 #define Is_dragon_scales(obj) \
@@ -397,6 +390,9 @@ struct obj {
 /* achievement tracking; 3.6.x did this differently */
 #define is_mines_prize(o) ((o)->o_id == g.context.achieveo.mines_prize_oid)
 #define is_soko_prize(o) ((o)->o_id == g.context.achieveo.soko_prize_oid)
+
+#define is_art(o,art) ((o) && (o)->oartifact == (art))
+#define u_wield_art(art) is_art(uwep, art)
 
 /* Flags for get_obj_location(). */
 #define CONTAINED_TOO 0x1

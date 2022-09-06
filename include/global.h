@@ -1,4 +1,4 @@
-/* NetHack 3.7	global.h	$NHDT-Date: 1646322467 2022/03/03 15:47:47 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.135 $ */
+/* NetHack 3.7	global.h	$NHDT-Date: 1657918090 2022/07/15 20:48:10 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.144 $ */
 /* Copyright (c) Stichting Mathematisch Centrum, Amsterdam, 1985. */
 /*-Copyright (c) Michael Allison, 2006. */
 /* NetHack may be freely redistributed.  See license for details. */
@@ -59,19 +59,36 @@
 #endif /* DUMB */
 
 /*
- * type xchar: small integers (typedef'd as signed char,
- * so in the range -127 - 127), usually coordinates.
+ * type xint8: small integers (typedef'd as signed,
+ * in the range -127 - 127).
  */
-typedef schar xchar;
+typedef int8_t xint8;
+/*
+ * type coordxy: integers (typedef'd as signed,
+ * in the range -32768 to 32767), mostly coordinates.
+ * Note that in 2022, screen coordinates easily
+ * surpass an upper limit of 127.
+ */
+typedef int16_t coordxy;
+/*
+ * type xint16: integers (typedef'd as signed,
+ * in the range -32768 to 32767), non-coordinates.
+ */
+typedef int16_t xint16;
 
 #ifdef __MINGW32__
 /* Resolve conflict with Qt 5 and MinGW-w32 */
 typedef unsigned char boolean; /* 0 or 1 */
 #else
 #ifndef SKIP_BOOLEAN
-typedef xchar boolean; /* 0 or 1 */
+typedef schar boolean; /* 0 or 1 */
 #endif
 #endif
+
+/* vision seen vectors: viz_array[][] and levl[][].seenv, which use different
+   values from each other but are close enough in size to share a type;
+   viz_array contains 8-bit bitmasks, lev->seenv is a 5-bit bitfield */
+typedef unsigned char seenV; /* no need for uint8_t */
 
 /* Type for third parameter of read(2) */
 #if defined(BSD) || defined(ULTRIX)
@@ -301,6 +318,7 @@ extern char *dupstr_n(const char *string, unsigned int *lenout);
 #ifdef MONITOR_HEAP
 /* plain alloc() is not declared except in alloc.c */
 extern long *nhalloc(unsigned int, const char *, int);
+extern long *nhrealloc(long *, unsigned int, const char *, int);
 extern void nhfree(genericptr_t, const char *, int);
 extern char *nhdupstr(const char *, const char *, int);
 /* this predates C99's __func__; that is trickier to use conditionally
@@ -314,11 +332,13 @@ extern char *nhdupstr(const char *, const char *, int);
 #define __LINE__ 0
 #endif
 #define alloc(a) nhalloc(a, __FILE__, (int) __LINE__)
+#define re_alloc(a,n) nhrealloc(a, n, __FILE__, (int) __LINE__)
 #define free(a) nhfree(a, __FILE__, (int) __LINE__)
 #define dupstr(s) nhdupstr(s, __FILE__, (int) __LINE__)
 #else /* !MONITOR_HEAP */
 /* declare alloc.c's alloc(); allocations made with it use ordinary free() */
 extern long *alloc(unsigned int);  /* alloc.c */
+extern long *re_alloc(long *, unsigned int);
 #endif /* ?MONITOR_HEAP */
 
 /* Used for consistency checks of various data files; declare it here so
@@ -492,5 +512,67 @@ extern struct nomakedefs_s nomakedefs;
                                * via #chronicle unless in wizard mode */
 #define LL_DUMP       0x4000L /* none of the above but should be in dumplog */
 #define LL_DEBUG      0x8000L /* For debugging messages and other spam */
+
+/*
+ * Lua sandbox
+ */
+/* Control block for setting up a Lua state with nhl_init(). */
+typedef struct nhl_sandbox_info {
+    uint32_t  flags;       /* see below */
+    uint32_t  memlimit;    /* approximate memory limit */
+    uint32_t  steps;       /* instruction limit for state OR ... */
+    uint32_t  perpcall;    /* ... instruction limit per nhl_pcall */
+} nhl_sandbox_info;
+
+/* For efficiency, we only check every NHL_SB_STEPSIZE instructions. */
+#ifndef NHL_SB_STEPSIZE
+#define NHL_SB_STEPSIZE 1000
+#endif
+
+/* High level groups.  Use these flags. */
+    /* Safe functions. */
+#define NHL_SB_SAFE        0x80000000
+    /* Access to Lua version information. */
+#define NHL_SB_VERSION     0x40000000
+    /* Debugging library - mostly unsafe. */
+#define NHL_SB_DEBUGGING   0x08000000
+    /* Use with memlimit/steps/perpcall to get usage. */
+#define NHL_SB_REPORT      0x04000000
+    /* As above, but do full gc on each nhl_pcall. */
+#define NHL_SB_REPORT2     0x02000000
+
+/* Low level groups.  If you need these, you probably need to define
+ * a new high level group instead. */
+#define NHL_SB_STRING      0x00000001
+#define NHL_SB_TABLE       0x00000002
+#define NHL_SB_COROUTINE   0x00000004
+#define NHL_SB_MATH        0x00000008
+#define NHL_SB_UTF8        0x00000010
+#ifdef notyet
+#define NHL_SB_IO          0x00000020
+#endif
+#define NHL_SB_OS          0x00000040
+
+#define NHL_SB_BASEMASK    0x00000f80
+#define NHL_SB_BASE_BASE   0x00000080
+#define NHL_SB_BASE_ERROR  0x00000100
+#define NHL_SB_BASE_META   0x00000200
+#define NHL_SB_BASE_GC     0x00000400
+#define NHL_SB_BASE_UNSAFE 0x00000800
+
+#define NHL_SB_DBMASK      0x00003000
+#define NHL_SB_DB_DB       0x00001000
+#define NHL_SB_DB_SAFE     0x00002000
+
+#define NHL_SB_OSMASK      0x0000c000
+#define NHL_SB_OS_TIME     0x00004000
+#define NHL_SB_OS_FILES    0x00008000
+
+#define NHL_SB_ALL         0x0000ffff
+
+/* return codes */
+#define NHL_SBRV_DENY 1
+#define NHL_SBRV_ACCEPT 2
+#define NHL_SBRV_FAIL 3
 
 #endif /* GLOBAL_H */

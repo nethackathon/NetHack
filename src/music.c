@@ -189,27 +189,27 @@ awaken_soldiers(struct monst* bugler  /* monster that played instrument */)
     }
 }
 
-/* Charm monsters in range.  Note that they may resist the spell.
- * If swallowed, range is reduced to 0.
- */
+/* Charm monsters in range.  Note that they may resist the spell. */
 static void
 charm_monsters(int distance)
 {
     struct monst *mtmp, *mtmp2;
 
-    if (u.uswallow) {
-        if (!resist(u.ustuck, TOOL_CLASS, 0, NOTELL))
-            (void) tamedog(u.ustuck, (struct obj *) 0);
-    } else {
-        for (mtmp = fmon; mtmp; mtmp = mtmp2) {
-            mtmp2 = mtmp->nmon;
-            if (DEADMONSTER(mtmp))
-                continue;
+    if (u.uswallow)
+        distance = 0; /* only u.ustuck will be affected (u.usteed is Null
+                       * since hero gets forcibly dismounted when engulfed) */
 
-            if (distu(mtmp->mx, mtmp->my) <= distance) {
-                if (!resist(mtmp, TOOL_CLASS, 0, NOTELL))
-                    (void) tamedog(mtmp, (struct obj *) 0);
-            }
+    for (mtmp = fmon; mtmp; mtmp = mtmp2) {
+        mtmp2 = mtmp->nmon;
+        if (DEADMONSTER(mtmp))
+            continue;
+
+        if (distu(mtmp->mx, mtmp->my) <= distance) {
+            /* a shopkeeper can't be tamed but tamedog() pacifies an angry
+               one; do that even if mtmp resists in order to behave the same
+               as a non-cursed scroll of taming or spell of charm monster */
+            if (!resist(mtmp, TOOL_CLASS, 0, NOTELL) || mtmp->isshk)
+                (void) tamedog(mtmp, (struct obj *) 0);
         }
     }
 }
@@ -221,7 +221,7 @@ static void
 do_earthquake(int force)
 {
     static const char into_a_chasm[] = " into a chasm";
-    register int x, y;
+    register coordxy x, y;
     struct monst *mtmp;
     struct obj *otmp;
     struct trap *chasm, *trap_at_u = t_at(u.ux, u.uy);
@@ -292,12 +292,10 @@ do_earthquake(int force)
                     pline_The("kitchen sink falls%s.", into_a_chasm);
                 goto do_pit;
             case ALTAR:
-                /* always preserve the high altars */
-                if (Is_astralevel(&u.uz) || Is_sanctum(&u.uz))
-                    break;
-                /* no need to check for high altar here; we've just
-                   excluded those */
                 amsk = altarmask_at(x, y);
+                /* always preserve the high altars */
+                if ((amsk & AM_SANCTUM) != 0)
+                    break;
                 algn = Amask2align(amsk & AM_MASK);
                 if (cansee(x, y))
                     pline_The("%s altar falls%s.",
@@ -601,11 +599,11 @@ do_improvisation(struct obj* instr)
                 losehp(damage, buf, KILLED_BY); /* fire or frost damage */
             }
         } else {
-            int type = (instr->otyp == FROST_HORN) ? AD_COLD - 1 : AD_FIRE - 1;
+            int type = BZ_OFS_AD((instr->otyp == FROST_HORN) ? AD_COLD : AD_FIRE);
 
             if (!Blind)
                 pline("A %s blasts out of the horn!", flash_str(type, FALSE));
-            buzz(type, rn1(6, 6), u.ux, u.uy, u.dx, u.dy);
+            ubuzz(BZ_U_WAND(type), rn1(6, 6));
         }
         makeknown(instr->otyp);
         break;
@@ -691,7 +689,7 @@ do_play_instrument(struct obj* instr)
 {
     char buf[BUFSZ] = DUMMY, c = 'y';
     char *s;
-    int x, y;
+    coordxy x, y;
     boolean ok;
 
     if (Underwater) {

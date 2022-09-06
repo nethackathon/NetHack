@@ -17,16 +17,33 @@ static void map_redisplay(void);
 static void browse_map(int, const char *);
 static void map_monst(struct monst *, boolean);
 static void do_dknown_of(struct obj *);
-static boolean check_map_spot(int, int, char, unsigned);
+static boolean check_map_spot(coordxy, coordxy, char, unsigned);
 static boolean clear_stale_map(char, unsigned);
-static void sense_trap(struct trap *, xchar, xchar, int);
+static void sense_trap(struct trap *, coordxy, coordxy, int);
 static int detect_obj_traps(struct obj *, boolean, int);
+static void display_trap_map(struct trap *, int);
 static int furniture_detect(void);
-static void show_map_spot(int, int);
-static void findone(int, int, genericptr_t);
-static void openone(int, int, genericptr_t);
+static void show_map_spot(coordxy, coordxy);
+static void findone(coordxy, coordxy, genericptr_t);
+static void openone(coordxy, coordxy, genericptr_t);
 static int mfind0(struct monst *, boolean);
-static int reveal_terrain_getglyph(int, int, int, unsigned, int, int);
+static int reveal_terrain_getglyph(coordxy, coordxy, int, unsigned, int, int);
+
+/* dummytrap: used when detecting traps finds a door or chest trap; the
+   couple of fields that matter are always re-initialized during use so
+   this does not need to be part of 'struct instance_globals g'; fields
+   that aren't used are compile-/link-/load-time initialized to 0 */
+static struct trap dummytrap;
+
+/* data for enhanced feedback from findone() */
+struct found_things {
+    uchar num_sdoors;
+    uchar num_scorrs;
+    uchar num_traps;
+    uchar num_mons;
+    uchar num_invis;
+    uchar num_cleared_invis;
+};
 
 /* wildcard class for clear_stale_map - this used to be used as a getobj()
    input but it's no longer used for that function */
@@ -104,14 +121,14 @@ map_monst(struct monst *mtmp, boolean showtail)
 /* this is checking whether a trap symbol represents a trapped chest,
    not whether a trapped chest is actually present */
 boolean
-trapped_chest_at(int ttyp, int x, int y)
+trapped_chest_at(int ttyp, coordxy x, coordxy y)
 {
     struct monst *mtmp;
     struct obj *otmp;
 
     if (!glyph_is_trap(glyph_at(x, y)))
         return FALSE;
-    if (ttyp != BEAR_TRAP || (Hallucination && rn2(20)))
+    if (ttyp != TRAPPED_CHEST || (Hallucination && rn2(20)))
         return FALSE;
 
     /*
@@ -147,13 +164,13 @@ trapped_chest_at(int ttyp, int x, int y)
 /* this is checking whether a trap symbol represents a trapped door,
    not whether the door here is actually trapped */
 boolean
-trapped_door_at(int ttyp, int x, int y)
+trapped_door_at(int ttyp, coordxy x, coordxy y)
 {
     struct rm *lev;
 
     if (!glyph_is_trap(glyph_at(x, y)))
         return FALSE;
-    if (ttyp != BEAR_TRAP || (Hallucination && rn2(20)))
+    if (ttyp != TRAPPED_DOOR || (Hallucination && rn2(20)))
         return FALSE;
     lev = &levl[x][y];
     if (!IS_DOOR(lev->typ))
@@ -227,7 +244,7 @@ do_dknown_of(struct obj *obj)
 
 /* Check whether the location has an outdated object displayed on it. */
 static boolean
-check_map_spot(int x, int y, char oclass, unsigned material)
+check_map_spot(coordxy x, coordxy y, char oclass, unsigned material)
 {
     int glyph;
     register struct obj *otmp;
@@ -283,7 +300,7 @@ check_map_spot(int x, int y, char oclass, unsigned material)
 static boolean
 clear_stale_map(char oclass, unsigned material)
 {
-    register int zx, zy;
+    register coordxy zx, zy;
     boolean change_made = FALSE;
 
     for (zx = 1; zx < COLNO; zx++)
@@ -571,7 +588,7 @@ int
 object_detect(struct obj *detector, /* object doing the detecting */
               int class)            /* an object class, 0 for all */
 {
-    register int x, y;
+    register coordxy x, y;
     char stuff[BUFSZ];
     int is_cursed = (detector && detector->cursed);
     int do_dknown = (detector && (detector->oclass == POTION_CLASS
@@ -726,7 +743,8 @@ object_detect(struct obj *detector, /* object doing the detecting */
             temp.quan = 1L;
             temp.ox = mtmp->mx;
             temp.oy = mtmp->my;
-            temp.corpsenm = PM_TENGU; /* if mimicing a corpse */
+            /* used for mimicking a corpse or statue */
+            temp.corpsenm = has_mcorpsenm(mtmp) ? MCORPSENM(mtmp) : PM_TENGU;
             map_object(&temp, 1);
         } else if (findgold(mtmp->minvent)
                    && (!class || class == COIN_CLASS)) {
@@ -829,7 +847,7 @@ monster_detect(struct obj *otmp, /* detecting object (if any) */
 }
 
 static void
-sense_trap(struct trap *trap, xchar x, xchar y, int src_cursed)
+sense_trap(struct trap *trap, coordxy x, coordxy y, int src_cursed)
 {
     if (Hallucination || src_cursed) {
         struct obj obj; /* fake object */
@@ -850,14 +868,16 @@ sense_trap(struct trap *trap, xchar x, xchar y, int src_cursed)
     } else if (trap) {
         map_trap(trap, 1);
         trap->tseen = 1;
-    } else { /* trapped door or trapped chest */
-        struct trap temp_trap; /* fake trap */
-
-        (void) memset((genericptr_t) &temp_trap, 0, sizeof temp_trap);
-        temp_trap.tx = x;
-        temp_trap.ty = y;
-        temp_trap.ttyp = BEAR_TRAP; /* some kind of trap */
-        map_trap(&temp_trap, 1);
+    } else {
+        /*
+         * OBSOLETE; this was for trapped door or trapped chest
+         * but those are handled by 'if (trap) {map_trap()}' now
+         * and this block of code shouldn't be reachable anymore.
+         */
+        dummytrap.tx = x;
+        dummytrap.ty = y;
+        dummytrap.ttyp = BEAR_TRAP; /* some kind of trap */
+        map_trap(&dummytrap, 1);
     }
 }
 
@@ -869,11 +889,13 @@ sense_trap(struct trap *trap, xchar x, xchar y, int src_cursed)
    2 if found at some other spot, 3 if both, 0 otherwise; optionally
    update the map to show where such traps were found */
 static int
-detect_obj_traps(struct obj *objlist, boolean show_them,
-                 int how) /* 1 for misleading map feedback */
+detect_obj_traps(
+    struct obj *objlist,
+    boolean show_them,
+    int how) /* 1 for misleading map feedback */
 {
     struct obj *otmp;
-    xchar x, y;
+    coordxy x, y;
     int result = OTRAP_NONE;
 
     /*
@@ -881,12 +903,15 @@ detect_obj_traps(struct obj *objlist, boolean show_them,
      * If so, should they be displayed as objects or as traps?
      */
 
+    dummytrap.ttyp = TRAPPED_CHEST;
     for (otmp = objlist; otmp; otmp = otmp->nobj) {
         if (Is_box(otmp) && otmp->otrapped
             && get_obj_location(otmp, &x, &y, BURIED_TOO | CONTAINED_TOO)) {
             result |= u_at(x, y) ? OTRAP_HERE : OTRAP_THERE;
-            if (show_them)
-                sense_trap((struct trap *) 0, x, y, how);
+            if (show_them) {
+                dummytrap.tx = x, dummytrap.ty = y;
+                sense_trap(&dummytrap, x, y, how);
+            }
         }
         if (Has_contents(otmp))
             result |= detect_obj_traps(otmp->cobj, show_them, how);
@@ -894,80 +919,13 @@ detect_obj_traps(struct obj *objlist, boolean show_them,
     return result;
 }
 
-/* the detections are pulled out so they can
- * also be used in the crystal ball routine
- * returns 1 if nothing was detected
- * returns 0 if something was detected
- */
-int
-trap_detect(struct obj *sobj) /* null if crystal ball,
-                                 *scroll if gold detection scroll */
+static void
+display_trap_map(struct trap *ttmp, int cursed_src)
 {
-    register struct trap *ttmp;
     struct monst *mon;
-    int door, glyph, tr, ter_typ = TER_DETECT | TER_TRP;
-    int cursed_src = sobj && sobj->cursed;
-    boolean found = FALSE;
+    int door, glyph, ter_typ = TER_DETECT | TER_TRP;
     coord cc;
 
-    if (u.usteed)
-        u.usteed->mx = u.ux, u.usteed->my = u.uy;
-
-    /* floor/ceiling traps */
-    for (ttmp = g.ftrap; ttmp; ttmp = ttmp->ntrap) {
-        if (ttmp->tx != u.ux || ttmp->ty != u.uy)
-            goto outtrapmap;
-        else
-            found = TRUE;
-    }
-    /* chest traps (might be buried or carried) */
-    if ((tr = detect_obj_traps(fobj, FALSE, 0)) != OTRAP_NONE) {
-        if (tr & OTRAP_THERE)
-            goto outtrapmap;
-        else
-            found = TRUE;
-    }
-    if ((tr = detect_obj_traps(g.level.buriedobjlist, FALSE, 0))
-        != OTRAP_NONE) {
-        if (tr & OTRAP_THERE)
-            goto outtrapmap;
-        else
-            found = TRUE;
-    }
-    for (mon = fmon; mon; mon = mon->nmon) {
-        if (DEADMONSTER(mon) || (mon->isgd && !mon->mx))
-            continue;
-        if ((tr = detect_obj_traps(mon->minvent, FALSE, 0)) != OTRAP_NONE) {
-            if (tr & OTRAP_THERE)
-                goto outtrapmap;
-            else
-                found = TRUE;
-        }
-    }
-    if (detect_obj_traps(g.invent, FALSE, 0) != OTRAP_NONE)
-        found = TRUE;
-    /* door traps */
-    for (door = 0; door < g.doorindex; door++) {
-        cc = g.doors[door];
-        if (levl[cc.x][cc.y].doormask & D_TRAPPED) {
-            if (cc.x != u.ux || cc.y != u.uy)
-                goto outtrapmap;
-            else
-                found = TRUE;
-        }
-    }
-    if (!found) {
-        char buf[BUFSZ];
-
-        Sprintf(buf, "Your %s stop itching.", makeplural(body_part(TOE)));
-        strange_feeling(sobj, buf);
-        return 1;
-    }
-    /* traps exist, but only under me - no separate display required */
-    Your("%s itch.", makeplural(body_part(TOE)));
-    return 0;
-
- outtrapmap:
     cls();
 
     (void) unconstrain_map();
@@ -985,10 +943,15 @@ trap_detect(struct obj *sobj) /* null if crystal ball,
     for (ttmp = g.ftrap; ttmp; ttmp = ttmp->ntrap)
         sense_trap(ttmp, 0, 0, cursed_src);
 
+    dummytrap.ttyp = TRAPPED_DOOR;
     for (door = 0; door < g.doorindex; door++) {
         cc = g.doors[door];
-        if (levl[cc.x][cc.y].doormask & D_TRAPPED)
-            sense_trap((struct trap *) 0, cc.x, cc.y, cursed_src);
+        if (levl[cc.x][cc.y].typ == SDOOR) /* see above */
+            continue;
+        if (levl[cc.x][cc.y].doormask & D_TRAPPED) {
+            dummytrap.tx = cc.x, dummytrap.ty = cc.y;
+            sense_trap(&dummytrap, cc.x, cc.y, cursed_src);
+        }
     }
 
     /* redisplay hero unless sense_trap() revealed something at <ux,uy> */
@@ -1002,6 +965,89 @@ trap_detect(struct obj *sobj) /* null if crystal ball,
     browse_map(ter_typ, "trap of interest");
 
     map_redisplay();
+}
+
+/* the detections are pulled out so they can
+ * also be used in the crystal ball routine
+ * returns 1 if nothing was detected
+ * returns 0 if something was detected
+ */
+int
+trap_detect(struct obj *sobj) /* null if crystal ball,
+                                 *scroll if gold detection scroll */
+{
+    register struct trap *ttmp;
+    struct monst *mon;
+    int door, tr;
+    int cursed_src = sobj && sobj->cursed;
+    boolean found = FALSE;
+    coord cc;
+
+    if (u.usteed)
+        u.usteed->mx = u.ux, u.usteed->my = u.uy;
+
+    /* floor/ceiling traps */
+    for (ttmp = g.ftrap; ttmp; ttmp = ttmp->ntrap) {
+        if (ttmp->tx != u.ux || ttmp->ty != u.uy) {
+            display_trap_map(ttmp, cursed_src);
+            return 0;
+        } else
+            found = TRUE;
+    }
+    /* chest traps (might be buried or carried) */
+    if ((tr = detect_obj_traps(fobj, FALSE, 0)) != OTRAP_NONE) {
+        if (tr & OTRAP_THERE) {
+            display_trap_map(ttmp, cursed_src);
+            return 0;
+        } else
+            found = TRUE;
+    }
+    if ((tr = detect_obj_traps(g.level.buriedobjlist, FALSE, 0))
+        != OTRAP_NONE) {
+        if (tr & OTRAP_THERE) {
+            display_trap_map(ttmp, cursed_src);
+            return 0;
+        } else
+            found = TRUE;
+    }
+    for (mon = fmon; mon; mon = mon->nmon) {
+        if (DEADMONSTER(mon) || (mon->isgd && !mon->mx))
+            continue;
+        if ((tr = detect_obj_traps(mon->minvent, FALSE, 0)) != OTRAP_NONE) {
+            if (tr & OTRAP_THERE) {
+                display_trap_map(ttmp, cursed_src);
+                return 0;
+            } else
+                found = TRUE;
+        }
+    }
+    if (detect_obj_traps(g.invent, FALSE, 0) != OTRAP_NONE)
+        found = TRUE;
+    /* door traps */
+    for (door = 0; door < g.doorindex; door++) {
+        cc = g.doors[door];
+        /* levl[][].doormask and .wall_info both overlay levl[][].flags;
+           the bit in doormask for D_TRAPPED is also a bit in wall_info;
+           secret doors use wall_info so can't be marked as trapped */
+        if (levl[cc.x][cc.y].typ == SDOOR)
+            continue;
+        if (levl[cc.x][cc.y].doormask & D_TRAPPED) {
+            if (cc.x != u.ux || cc.y != u.uy) {
+                display_trap_map(ttmp, cursed_src);
+                return 0;
+            } else
+                found = TRUE;
+        }
+    }
+    if (!found) {
+        char buf[BUFSZ];
+
+        Sprintf(buf, "Your %s stop itching.", makeplural(body_part(TOE)));
+        strange_feeling(sobj, buf);
+        return 1;
+    }
+    /* traps exist, but only under me - no separate display required */
+    Your("%s itch.", makeplural(body_part(TOE)));
     return 0;
 }
 
@@ -1009,7 +1055,8 @@ static int
 furniture_detect(void)
 {
     struct monst *mon;
-    int x, y, glyph, sym, found = 0, revealed = 0;
+    coordxy x, y;
+    int glyph, sym, found = 0, revealed = 0;
 
     (void) unconstrain_map();
 
@@ -1203,12 +1250,12 @@ use_crystal_ball(struct obj **optr)
     }
 
     /* read a single character */
-    if (flags.verbose)
+    if (Verbose(0, use_crystal_ball1))
         You("may look for an object, monster, or special map symbol.");
-    ch = yn_function("What do you look for?", (char *) 0, '\0');
+    ch = yn_function("What do you look for?", (char *) 0, '\0', TRUE);
     /* Don't filter out ' ' here; it has a use */
     if ((ch != def_monsyms[S_GHOST].sym) && index(quitchars, ch)) {
-        if (flags.verbose)
+        if (Verbose(0, use_crystal_ball2))
             pline1(Never_mind);
         return;
     }
@@ -1276,7 +1323,7 @@ use_crystal_ball(struct obj **optr)
 }
 
 static void
-show_map_spot(int x, int y)
+show_map_spot(coordxy x, coordxy y)
 {
     struct rm *lev;
     struct trap *t;
@@ -1505,7 +1552,7 @@ cvt_sdoor_to_door(struct rm *lev)
 /* find something at one location; it should find all somethings there
    since it is used for magical detection rather than physical searching */
 static void
-findone(int zx, int zy, genericptr_t num)
+findone(coordxy zx, coordxy zy, genericptr_t whatfound)
 {
     register struct trap *ttmp;
     register struct monst *mtmp;
@@ -1521,13 +1568,13 @@ findone(int zx, int zy, genericptr_t num)
         cvt_sdoor_to_door(&levl[zx][zy]); /* .typ = DOOR */
         magic_map_background(zx, zy, 0);
         newsym(zx, zy);
-        (*(int *) num)++;
+        ((struct found_things *) whatfound)->num_sdoors++;
     } else if (levl[zx][zy].typ == SCORR) {
         levl[zx][zy].typ = CORR;
         unblock_point(zx, zy);
         magic_map_background(zx, zy, 0);
         newsym(zx, zy);
-        (*(int *) num)++;
+        ((struct found_things *) whatfound)->num_scorrs++;
     }
 
     if ((ttmp = t_at(zx, zy)) != 0 && !ttmp->tseen
@@ -1535,7 +1582,7 @@ findone(int zx, int zy, genericptr_t num)
         && ttmp->ttyp != STATUE_TRAP) {
         ttmp->tseen = 1;
         newsym(zx, zy);
-        (*(int *) num)++;
+        ((struct found_things *) whatfound)->num_traps++;
     }
 
     if ((mtmp = m_at(zx, zy)) != 0
@@ -1543,23 +1590,25 @@ findone(int zx, int zy, genericptr_t num)
         && (!canspotmon(mtmp) || mtmp->mundetected || M_AP_TYPE(mtmp))) {
         if (M_AP_TYPE(mtmp)) {
             seemimic(mtmp);
-            (*(int *) num)++;
+            ((struct found_things *) whatfound)->num_mons++;
         } else if (mtmp->mundetected && (is_hider(mtmp->data)
                                          || hides_under(mtmp->data)
                                          || mtmp->data->mlet == S_EEL)) {
             mtmp->mundetected = 0;
             newsym(zx, zy);
-            (*(int *) num)++;
+            ((struct found_things *) whatfound)->num_mons++;
         }
-        if (!canspotmon(mtmp) && !glyph_is_invisible(levl[zx][zy].glyph))
+        if (!canspotmon(mtmp) && !glyph_is_invisible(levl[zx][zy].glyph)) {
             map_invisible(zx, zy);
+            ((struct found_things *) whatfound)->num_invis++;
+        }
     } else if (unmap_invisible(zx, zy)) {
-        (*(int *) num)++;
+        ((struct found_things *) whatfound)->num_cleared_invis++;
     }
 }
 
 static void
-openone(int zx, int zy, genericptr_t num)
+openone(coordxy zx, coordxy zy, genericptr_t num)
 {
     register struct trap *ttmp;
     register struct obj *otmp;
@@ -1574,6 +1623,8 @@ openone(int zx, int zy, genericptr_t num)
         }
         /* let it fall to the next cases. could be on trap. */
     }
+    /* note: secret doors can't be trapped; they use levl[][].wall_info;
+       see rm.h for the troublesome overlay of doormask and wall_info */
     if (levl[zx][zy].typ == SDOOR
         || (levl[zx][zy].typ == DOOR
             && (levl[zx][zy].doormask & (D_CLOSED | D_LOCKED)))) {
@@ -1623,10 +1674,41 @@ int
 findit(void)
 {
     int num = 0;
+    struct found_things found = {0};
 
     if (u.uswallow)
         return 0;
-    do_clear_area(u.ux, u.uy, BOLT_LIM, findone, (genericptr_t) &num);
+    do_clear_area(u.ux, u.uy, BOLT_LIM, findone, (genericptr_t) &found);
+
+    if (found.num_sdoors)
+        You("reveal %ssecret door%s!", found.num_sdoors == 1 ? "a " : "",
+            found.num_sdoors == 1 ? "" : "s");
+    num += found.num_sdoors;
+
+    if (found.num_scorrs)
+        You("reveal %ssecret corridor%s!", found.num_scorrs == 1 ? "a " : "",
+            found.num_scorrs == 1 ? "" : "s");
+    num += found.num_scorrs;
+
+    if (found.num_traps)
+        You("reveal %strap%s!", found.num_traps == 1 ? "a " : "",
+            found.num_traps == 1 ? "" : "s");
+    num += found.num_traps;
+
+    if (found.num_mons)
+        You("reveal %shidden monster%s!", found.num_mons == 1 ? "a " : "",
+            found.num_mons == 1 ? "" : "s");
+    num += found.num_mons;
+
+    if (found.num_invis)
+        You("detect %sinvisible monster%s!", found.num_invis == 1 ? "an " : "",
+            found.num_invis == 1 ? "" : "s");
+    num += found.num_invis;
+
+    if (!num && found.num_cleared_invis)
+        You_feel("less paranoid.");
+    num += found.num_cleared_invis;
+
     return num;
 }
 
@@ -1637,11 +1719,17 @@ openit(void)
     int num = 0;
 
     if (u.uswallow) {
-        if (is_animal(u.ustuck->data)) {
+        if (digests(u.ustuck->data)) {
+            /* purple worm */
             if (Blind)
                 pline("Its mouth opens!");
             else
                 pline("%s opens its mouth!", Monnam(u.ustuck));
+#if 0   /* expels() will take care of this */
+        } else if (enfolds(u.ustuck->data)) {
+            /* trapper or lurker above */
+            pline("%s unfolds!", Monnam(u.ustuck));
+#endif
         }
         expels(u.ustuck, u.ustuck->data, TRUE);
         return -1;
@@ -1653,7 +1741,7 @@ openit(void)
 
 /* callback hack for overriding vision in do_clear_area() */
 boolean
-detecting(void (*func)(int, int, genericptr_t))
+detecting(void (*func)(coordxy, coordxy, genericptr_t))
 {
     return (func == findone || func == openone);
 }
@@ -1690,7 +1778,7 @@ find_trap(struct trap *trap)
 static int
 mfind0(struct monst *mtmp, boolean via_warning)
 {
-    int x = mtmp->mx, y = mtmp->my;
+    coordxy x = mtmp->mx, y = mtmp->my;
     boolean found_something = FALSE;
 
     if (via_warning && !warning_of(mtmp))
@@ -1706,8 +1794,8 @@ mfind0(struct monst *mtmp, boolean via_warning)
         if (mtmp->mundetected && (is_hider(mtmp->data)
                                   || hides_under(mtmp->data)
                                   || mtmp->data->mlet == S_EEL)) {
-            if (via_warning) {
-                Your("warning senses cause you to take a second %s.",
+            if (via_warning && found_something) {
+                Your("danger sense causes you to take a second %s.",
                      Blind ? "to check nearby" : "look close by");
                 display_nhwindow(WIN_MESSAGE, FALSE); /* flush messages */
             }
@@ -1738,7 +1826,7 @@ mfind0(struct monst *mtmp, boolean via_warning)
 int
 dosearch0(int aflag) /* intrinsic autosearch vs explicit searching */
 {
-    xchar x, y;
+    coordxy x, y;
     register struct trap *trap;
     register struct monst *mtmp;
 
@@ -1826,7 +1914,7 @@ dosearch(void)
 void
 warnreveal(void)
 {
-    int x, y;
+    coordxy x, y;
     struct monst *mtmp;
 
     for (x = u.ux - 1; x <= u.ux + 1; x++)
@@ -1843,7 +1931,7 @@ warnreveal(void)
 void
 sokoban_detect(void)
 {
-    register int x, y;
+    register coordxy x, y;
     register struct trap *ttmp;
     register struct obj *obj;
 
@@ -1870,7 +1958,7 @@ sokoban_detect(void)
 }
 
 static int
-reveal_terrain_getglyph(int x, int y, int full, unsigned swallowed,
+reveal_terrain_getglyph(coordxy x, coordxy y, int full, unsigned swallowed,
                         int default_glyph, int which_subset)
 {
     int glyph, levl_glyph;
@@ -1942,8 +2030,11 @@ reveal_terrain_getglyph(int x, int y, int full, unsigned swallowed,
             }
         }
     }
+    /* FIXME: dirty hack */
     if (glyph == cmap_to_glyph(S_darkroom))
-        glyph = cmap_to_glyph(S_room); /* FIXME: dirty hack */
+        glyph = cmap_to_glyph(S_room);
+    else if (glyph == cmap_to_glyph(S_litcorr))
+        glyph = cmap_to_glyph(S_corr);
     return glyph;
 }
 
@@ -1951,7 +2042,8 @@ reveal_terrain_getglyph(int x, int y, int full, unsigned swallowed,
 void
 dump_map(void)
 {
-    int x, y, glyph, skippedrows, lastnonblank;
+    coordxy x, y;
+    int glyph, skippedrows, lastnonblank;
     int subset = TER_MAP | TER_TRP | TER_OBJ | TER_MON;
     int default_glyph = cmap_to_glyph(g.level.flags.arboreal ? S_tree
                                                              : S_stone);
@@ -2014,7 +2106,8 @@ reveal_terrain(
     if ((Hallucination || Stunned || Confusion) && !full) {
         You("are too disoriented for this.");
     } else {
-        int x, y, glyph, default_glyph;
+        coordxy x, y;
+        int glyph, default_glyph;
         char buf[BUFSZ];
         /* there is a TER_MAP bit too; we always show map regardless of it */
         boolean keep_traps = (which_subset & TER_TRP) !=0,

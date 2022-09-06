@@ -9,8 +9,6 @@ autoopen       walking into a door attempts to open it             [True]
 autopickup     automatically pick up objects you move over         [True]
 autoquiver     when firing with an empty quiver, select some      [False]
                suitable inventory weapon to fill the quiver
-autounlock     when opening a locked door or looting a locked      [True]
-               container while carrying a key, offer to use it
 BIOS           allow the use of IBM ROM BIOS calls                [False]
 blind          your character is permanently blind                [False]
 bones          allow loading bones files                           [True]
@@ -97,7 +95,7 @@ color          use different colors for objects on screen  [True for micros]
 hilite_pet     display pets in a highlighted manner               [False]
 hilite_pile    display item piles in a highlighted manner         [False]
 
-Boolean option if TIMED_DELAY was set at compile time (tty interface only):
+Boolean option if TIMED_DELAY was set at compile time (tty or curses only):
 timed_delay    on unix and VMS, use a timer instead of sending     [True]
                extra screen output when attempting to pause for
                display effect.  on MSDOS without the termcap
@@ -136,7 +134,7 @@ tiled_map      show map as tiles, forces ascii_map Off; Qt, X11
 Boolean options available when running in debug mode (aka wizard mode):
 menu_tab_sep   menu formatting--do not touch
 monpolycontrol have player choose shape-changing monsters' new shapes
-travel_debug   not implemented?
+travel_debug   show state of travel pathfinding algorithm on the map
 wizweight      include item weights in inventory display
 
 Any Boolean option can be set to True by including it among options being
@@ -150,6 +148,18 @@ Compound options are written as option_name:option_value.
 
 Compound options which can be set during the game are:
 
+autounlock    when attempting to open a locked door or loot     [Apply-Key]
+              a locked container, specifies an action to take: can be
+              None, or one or more of Untrap + Apply-Key + Kick + Force;
+              if Untrap is included, it will be handled first; the
+              others apply if you answer "no" to "check for traps?";
+              for "yes", it won't necessary find anything even when a
+              trap happens to be present and will use up the rest of
+              the current move regardless of whether it finds anything;
+              Kick is only useful for doors and Force is only useful for
+              containers; either will only be attempted if Untrap is
+              omitted or skipped and Apply-Key is omitted or you aren't
+              carrying an unlocking tool or you decline to use one
 boulder       override the default boulder symbol                       [`]
 disclose      the types of information you want         [ni na nv ng nc no]
               offered at the end of the game

@@ -438,9 +438,10 @@ polyself(int psflags)
 {
     char buf[BUFSZ];
     int old_light, new_light, mntmp, class, tryct, gvariant = NEUTRAL;
-    boolean forcecontrol = (psflags == 1),
-            monsterpoly = (psflags == 2),
-            formrevert = (psflags == 3),
+    boolean forcecontrol = ((psflags & POLY_CONTROLLED) != 0),
+            low_control = ((psflags & POLY_LOW_CTRL) != 0),
+            monsterpoly = ((psflags & POLY_MONSTER) != 0),
+            formrevert = ((psflags & POLY_REVERT) != 0),
             draconian = (uarm && Is_dragon_armor(uarm)),
             iswere = (u.ulycn >= LOW_PM),
             isvamp = (is_vampire(g.youmonst.data)
@@ -469,6 +470,11 @@ polyself(int psflags)
         monsterpoly = TRUE;
         controllable_poly = FALSE;
     }
+
+    if (forcecontrol && low_control
+        && (draconian || monsterpoly || isvamp || iswere))
+        forcecontrol = FALSE;
+
     if (monsterpoly && isvamp)
         goto do_vampyr;
 
@@ -844,7 +850,7 @@ polymon(int mntmp)
             dismount_steed(DISMOUNT_POLY);
     }
 
-    if (flags.verbose) {
+    if (Verbose(2, polymon)) {
         static const char use_thec[] = "Use the command #%s to %s.";
         static const char monsterc[] = "monster";
         struct permonst *uptr = g.youmonst.data;
@@ -1246,8 +1252,7 @@ dobreathe(void)
     else if (!u.dx && !u.dy && !u.dz)
         ubreatheu(mattk);
     else
-        buzz((int) (20 + mattk->adtyp - 1), (int) mattk->damn, u.ux, u.uy,
-             u.dx, u.dy);
+        ubuzz(BZ_U_BREATH(BZ_OFS_AD(mattk->adtyp)), (int) mattk->damn);
     return ECMD_TIME;
 }
 
@@ -1585,8 +1590,8 @@ dohide(void)
     if (u.ustuck || (u.utrap && (u.utraptype != TT_PIT || on_ceiling))) {
         You_cant("hide while you're %s.",
                  !u.ustuck ? "trapped"
-                   : u.uswallow ? (is_animal(u.ustuck->data) ? "swallowed"
-                                                             : "engulfed")
+                   : u.uswallow ? (digests(u.ustuck->data) ? "swallowed"
+                                                           : "engulfed")
                      : !sticks(g.youmonst.data) ? "being held"
                        : (humanoid(u.ustuck->data) ? "holding someone"
                                                    : "holding that creature"));
@@ -1681,7 +1686,7 @@ dopoly(void)
     struct permonst *savedat = g.youmonst.data;
 
     if (is_vampire(g.youmonst.data) || is_vampshifter(&g.youmonst)) {
-        polyself(2);
+        polyself(POLY_MONSTER);
         if (savedat != g.youmonst.data) {
             You("transform into %s.",
                 an(pmname(g.youmonst.data, Ugender)));

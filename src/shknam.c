@@ -389,7 +389,7 @@ veggy_item(struct obj* obj, int otyp /* used iff obj is null */)
     }
 
     if (oclass == FOOD_CLASS) {
-        if (objects[otyp].oc_material == VEGGY || is_egg(otyp))
+        if (objects[otyp].oc_material == VEGGY || otyp == EGG)
             return TRUE;
         if (otyp == TIN && corpsenm == NON_PM) /* implies obj is non-null */
             return (boolean) (obj->spe == 1); /* 0 = empty, 1 = spinach */
@@ -641,7 +641,7 @@ shkinit(const struct shclass* shp, struct mkroom* sroom)
     shk->isshk = shk->mpeaceful = 1;
     set_malign(shk);
     shk->msleeping = 0;
-    shk->mtrapseen = ~0; /* we know all the traps already */
+    mon_learns_traps(shk, ALL_TRAPS); /* we know all the traps already */
     eshkp->shoproom = (schar) ((sroom - g.rooms) + ROOMOFFSET);
     sroom->resident = shk;
     eshkp->shoptype = sroom->rtype;

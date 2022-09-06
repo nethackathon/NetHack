@@ -1,4 +1,4 @@
-/* NetHack 3.7	artifact.c	$NHDT-Date: 1646870837 2022/03/10 00:07:17 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.182 $ */
+/* NetHack 3.7	artifact.c	$NHDT-Date: 1654717838 2022/06/08 19:50:38 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.190 $ */
 /* Copyright (c) Stichting Mathematisch Centrum, Amsterdam, 1985. */
 /*-Copyright (c) Robert Patrick Rankin, 2013. */
 /* NetHack may be freely redistributed.  See license for details. */
@@ -27,7 +27,7 @@ static unsigned long abil_to_spfx(long *);
 static uchar abil_to_adtyp(long *);
 static int glow_strength(int);
 static boolean untouchable(struct obj *, boolean);
-static int count_surround_traps(int, int);
+static int count_surround_traps(coordxy, coordxy);
 
 /* The amount added to the victim's total hit points to insure that the
    victim will be killed even after damage bonus/penalty adjustments.
@@ -57,7 +57,7 @@ struct arti_info {
 static struct arti_info artiexist[1 + NROFARTIFACTS];
 /* discovery list; for N discovered artifacts, the first N entries are ART_xx
    values in discovery order, the remaining (NROFARTIFACTS-N) slots are 0 */
-static xchar artidisco[NROFARTIFACTS];
+static xint16 artidisco[NROFARTIFACTS];
 /* note: artiexist[] and artidisco[] don't need to be in struct g; they
  * get explicitly initialized at game start so don't need to be part of
  * bulk re-init if game restart ever gets implemented.  They are saved
@@ -433,7 +433,7 @@ boolean
 confers_luck(struct obj *obj)
 {
     /* might as well check for this too */
-    if (obj->otyp == LUCKSTONE || obj->otyp == GOLDEN_EGG)
+    if (obj->otyp == LUCKSTONE)
         return TRUE;
 
     return (boolean) (obj->oartifact && spec_ability(obj, SPFX_LUCK));
@@ -987,7 +987,7 @@ spec_dbon(struct obj *otmp, struct monst *mon, int tmp)
     if (!weap || (weap->attk.adtyp == AD_PHYS /* check for `NO_ATTK' */
                   && weap->attk.damn == 0 && weap->attk.damd == 0))
         g.spec_dbon_applies = FALSE;
-    else if (otmp->oartifact == ART_GRIMTOOTH)
+    else if (is_art(otmp, ART_GRIMTOOTH))
         /* Grimtooth has SPFX settings to warn against elves but we want its
            damage bonus to apply to all targets, so bypass spec_applies() */
         g.spec_dbon_applies = TRUE;
@@ -1001,7 +1001,7 @@ spec_dbon(struct obj *otmp, struct monst *mon, int tmp)
 
 /* add identified artifact to discoveries list */
 void
-discover_artifact(xchar m)
+discover_artifact(xint16 m)
 {
     int i;
 
@@ -1019,7 +1019,7 @@ discover_artifact(xchar m)
 
 /* used to decide whether an artifact has been fully identified */
 boolean
-undiscovered_artifact(xchar m)
+undiscovered_artifact(xint16 m)
 {
     int i;
 
@@ -1300,7 +1300,7 @@ Mb_hit(struct monst *magr, /* attacker */
             shieldeff(youdefend ? u.ux : mdef->mx,
                       youdefend ? u.uy : mdef->my);
         }
-        if ((do_stun || do_confuse) && flags.verbose) {
+        if ((do_stun || do_confuse) && Verbose(0,Mb_hit)) {
             char buf[BUFSZ];
 
             buf[0] = '\0';
@@ -1428,7 +1428,7 @@ artifact_hit(struct monst *magr, struct monst *mdef, struct obj *otmp,
     /* We really want "on a natural 20" but Nethack does it in */
     /* reverse from AD&D. */
     if (spec_ability(otmp, SPFX_BEHEAD)) {
-        if (otmp->oartifact == ART_TSURUGI_OF_MURAMASA && dieroll == 1) {
+        if (is_art(otmp, ART_TSURUGI_OF_MURAMASA) && dieroll == 1) {
             wepdesc = "The razor-sharp blade";
             /* not really beheading, but so close, why add another SPFX */
             if (youattack && engulfing_u(mdef)) {
@@ -1472,7 +1472,7 @@ artifact_hit(struct monst *magr, struct monst *mdef, struct obj *otmp,
                 otmp->dknown = TRUE;
                 return TRUE;
             }
-        } else if (otmp->oartifact == ART_VORPAL_BLADE
+        } else if (is_art(otmp, ART_VORPAL_BLADE)
                    && (dieroll == 1 || mdef->data == &mons[PM_JABBERWOCK])) {
             static const char *const behead_msg[2] = { "%s beheads %s!",
                                                        "%s decapitates %s!" };
@@ -1543,7 +1543,7 @@ artifact_hit(struct monst *magr, struct monst *mdef, struct obj *otmp,
                    the result won't be printed */
                 char *otmpname = distant_name(otmp, xname);
 
-                if (otmp->oartifact == ART_STORMBRINGER)
+                if (is_art(otmp, ART_STORMBRINGER))
                     pline_The("%s blade draws the %s from %s!",
                               hcolor(NH_BLACK), life, mon_nam(mdef));
                 else
@@ -1576,7 +1576,7 @@ artifact_hit(struct monst *magr, struct monst *mdef, struct obj *otmp,
 
             if (Blind) {
                 You_feel("an %s drain your %s!",
-                         (otmp->oartifact == ART_STORMBRINGER)
+                         is_art(otmp, ART_STORMBRINGER)
                             ? "unholy blade"
                             : "object",
                          life);
@@ -1585,7 +1585,7 @@ artifact_hit(struct monst *magr, struct monst *mdef, struct obj *otmp,
                    the result won't be printed */
                 char *otmpname = distant_name(otmp, xname);
 
-                if (otmp->oartifact == ART_STORMBRINGER)
+                if (is_art(otmp, ART_STORMBRINGER))
                     pline_The("%s blade drains your %s!",
                               hcolor(NH_BLACK), life);
                 else
@@ -1720,7 +1720,7 @@ arti_invoke(struct obj *obj)
             break;
         }
         case UNTRAP: {
-            if (!untrap(TRUE)) {
+            if (!untrap(TRUE, 0, 0, (struct obj *) 0)) {
                 obj->age = 0; /* don't charge for changing their mind */
                 return ECMD_OK;
             }
@@ -1749,6 +1749,7 @@ arti_invoke(struct obj *obj)
             d_level newlev;
             winid tmpwin = create_nhwindow(NHW_MENU);
             anything any;
+            int clr = 0;
 
             any = cg.zeroany; /* set all bits to zero */
             start_menu(tmpwin, MENU_BEHAVE_STANDARD);
@@ -1758,7 +1759,8 @@ arti_invoke(struct obj *obj)
                     continue;
                 any.a_int = i + 1;
                 add_menu(tmpwin, &nul_glyphinfo, &any, 0, 0,
-                         ATR_NONE, g.dungeons[i].dname, MENU_ITEMFLAGS_NONE);
+                         ATR_NONE, clr,
+                         g.dungeons[i].dname, MENU_ITEMFLAGS_NONE);
                 num_ok_dungeons++;
                 last_ok_dungeon = i;
             }
@@ -1827,6 +1829,56 @@ arti_invoke(struct obj *obj)
             otmp = hold_another_object(otmp, "Suddenly %s out.",
                                        aobjnam(otmp, "fall"), (char *) 0);
             nhUse(otmp);
+            break;
+        }
+        case BANISH: {
+            int nvanished = 0, nstayed = 0;
+            struct monst *mtmp, *mtmp2;
+            d_level dest;
+
+            find_hell(&dest);
+
+            for (mtmp = fmon; mtmp; mtmp = mtmp2) {
+                int chance = 1;
+
+                mtmp2 = mtmp->nmon;
+                if (DEADMONSTER(mtmp) || !isok(mtmp->mx, mtmp->my))
+                    continue;
+                if (!is_demon(mtmp->data) && mtmp->data->mlet != S_IMP)
+                    continue;
+                if (!couldsee(mtmp->mx, mtmp->my))
+                    continue;
+                if (mtmp->data->msound == MS_NEMESIS)
+                    continue;
+
+                if (In_quest(&u.uz) && !g.quest_status.killed_nemesis)
+                    chance += 10;
+                if (is_dprince(mtmp->data))
+                    chance += 2;
+                if (is_dlord(mtmp->data))
+                    chance++;
+
+                mtmp->msleeping = mtmp->mtame = mtmp->mpeaceful = 0;
+                if (chance <= 1 || !rn2(chance)) {
+                    if (!Inhell) {
+                        nvanished++;
+                        /* banish to a random level in Gehennom */
+                        dest.dlevel = rn2(dunlevs_in_dungeon(&dest));
+                        migrate_mon(mtmp, ledger_no(&dest), MIGR_RANDOM);
+                    } else {
+                        u_teleport_mon(mtmp, FALSE);
+                    }
+                } else {
+                    nstayed++;
+                }
+            }
+
+            if (nvanished) {
+                pline("%she demon%s disappear%s in a cloud of brimstone!",
+                      nstayed ? (nvanished > nstayed ? "Most of t" : "Some of t") : "T",
+                      nvanished > 1 ? "s" : "",
+                      nvanished > 1 ? "" : "s");
+            }
             break;
         }
         }
@@ -1924,7 +1976,7 @@ artifact_light(struct obj *obj)
         && (obj->owornmask & W_ARM) != 0L)
         return TRUE;
 
-    return (boolean) (get_artifact(obj) && obj->oartifact == ART_SUNSWORD);
+    return (boolean) (get_artifact(obj) && is_art(obj, ART_SUNSWORD));
 }
 
 /* KMH -- Talking artifacts are finally implemented */
@@ -2112,10 +2164,9 @@ glow_verb(int count, /* 0 means blind rather than no applicable creatures */
 void
 Sting_effects(int orc_count) /* new count (warn_obj_cnt is old count); -1 is a flag value */
 {
-    if (uwep
-        && (uwep->oartifact == ART_STING
-            || uwep->oartifact == ART_ORCRIST
-            || uwep->oartifact == ART_GRIMTOOTH)) {
+    if (u_wield_art(ART_STING)
+        || u_wield_art(ART_ORCRIST)
+        || u_wield_art(ART_GRIMTOOTH)) {
         int oldstr = glow_strength(g.warn_obj_cnt),
             newstr = glow_strength(orc_count);
 
@@ -2179,13 +2230,26 @@ retouch_object(
                  obj->owornmask ? " anymore" : "");
         /* also inflict damage unless touch_artifact() already did so */
         if (!touch_blasted) {
+            const char *what = killer_xname(obj);
+
+            if (ag && !obj->oartifact && !bane) {
+                /* 'obj' is silver; for rings and wands it ended up that
+                   way due to randomization at start of game; showing this
+                   game's silver item without stating that it is silver
+                   potentially leads to confusion about cause of death */
+                if (obj->oclass == RING_CLASS)
+                    what = "a silver ring";
+                else if (obj->oclass == WAND_CLASS)
+                    what = "a silver wand";
+                /* for anything else, stick with killer_xname() */
+            }
             /* damage is somewhat arbitrary; half the usual 1d20 physical
                for silver, 1d10 magical for <foo>bane, potentially both */
             if (ag)
                 tmp = rnd(10), dmg += Maybe_Half_Phys(tmp);
             if (bane)
                 dmg += rnd(10);
-            Sprintf(buf, "handling %s", killer_xname(obj));
+            Sprintf(buf, "handling %s", what);
             losehp(dmg, buf, KILLED_BY);
             exercise(A_CON, FALSE);
         }
@@ -2332,12 +2396,13 @@ retouch_equipment(int dropflag) /* 0==don't drop, 1==drop all, 2==drop weapon */
 }
 
 static int
-count_surround_traps(int x, int y)
+count_surround_traps(coordxy x, coordxy y)
 {
     struct rm *levp;
     struct obj *otmp;
     struct trap *ttmp;
-    int dx, dy, glyph, ret = 0;
+    coordxy dx, dy;
+    int glyph, ret = 0;
 
     for (dx = x - 1; dx < x + 2; ++dx)
         for (dy = y - 1; dy < y + 2; ++dy) {
@@ -2384,7 +2449,7 @@ mkot_trap_warn(void)
         "hot", "very hot", "like fire"
     };
 
-    if (!uarmg && uwep && uwep->oartifact == ART_MASTER_KEY_OF_THIEVERY) {
+    if (!uarmg && u_wield_art(ART_MASTER_KEY_OF_THIEVERY)) {
         int idx, ntraps = count_surround_traps(u.ux, u.uy);
 
         if (ntraps != g.mkot_trap_warn_count) {
@@ -2402,7 +2467,7 @@ boolean
 is_magic_key(struct monst *mon, /* if null, non-rogue is assumed */
              struct obj *obj)
 {
-    if (obj && obj->oartifact == ART_MASTER_KEY_OF_THIEVERY) {
+    if (is_art(obj, ART_MASTER_KEY_OF_THIEVERY)) {
         if ((mon == &g.youmonst) ? Role_if(PM_ROGUE)
                                  : (mon && mon->data == &mons[PM_ROGUE]))
             return !obj->cursed; /* a rogue; non-cursed suffices for magic */

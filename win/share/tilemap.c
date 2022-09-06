@@ -54,14 +54,19 @@ extern void exit(int);
 #endif
 #endif
 
+#if defined(CROSSCOMPILE) && defined(ENHANCED_SYMBOLS)
+#undef ENHANCED_SYMBOLS
+#endif
+
 struct {
     int idx;
     const char *tilelabel;
     const char *expectedlabel;
-} altlabels[MAXPCHARS] = {
+} altlabels[MAXPCHARS + 1] = {
 #define PCHAR_TILES
 #include "defsym.h"
 #undef PCHAR_TILES
+   { 0, 0, 0 }
 };
 
 enum {MON_GLYPH, OBJ_GLYPH, OTH_GLYPH, TERMINATOR = -1};
@@ -362,7 +367,7 @@ tilename(int set, const int file_entry, int gend UNUSED)
         }
 
         /* cmap B */
-        for (cmap = S_grave; cmap <= S_vibrating_square; cmap++) {
+        for (cmap = S_grave; cmap < S_arrow_trap + MAXTCHARS; cmap++) {
             i = cmap - S_grave;
             if (tilenum == file_entry) {
                 if (*defsyms[cmap].explanation) {
@@ -410,12 +415,12 @@ tilename(int set, const int file_entry, int gend UNUSED)
             }
         }
 #else
-    i = file_entry - tilenum;
-    if (i < (NUM_ZAP << 2)) {
-        Sprintf(buf, "%s zap %d %d", zap_texts[i / 4], (i / 4) + 1, i % 4);
-        return buf;
-    }
-    tilenum += (NUM_ZAP << 2);
+        i = file_entry - tilenum;
+        if (i < (NUM_ZAP << 2)) {
+            Sprintf(buf, "%s zap %d %d", zap_texts[i / 4], (i / 4) + 1, i % 4);
+            return buf;
+        }
+        tilenum += (NUM_ZAP << 2);
 #endif
 
         /* cmap C */
@@ -665,11 +670,11 @@ init_tilemap(void)
                   ((S_trwall - S_vwall) + 1) +             /* main walls */
                   ((S_brdnladder - S_ndoor) + 1) +         /* cmap A */
                   5 +                                      /* 5 altar tiles */
-                  ((S_vibrating_square - S_grave) + 1) +   /* cmap B */
+                  (S_arrow_trap + MAXTCHARS - S_grave) +   /* cmap B */
                   (NUM_ZAP << 2)  +                        /* zaps */
                   ((S_goodpos - S_digbeam) + 1);           /* cmap C */
 
-   /* add number compiled out */
+    /* add number compiled out */
     for (i = 0; conditionals[i].sequence != TERMINATOR; i++) {
         switch (conditionals[i].sequence) {
         case MON_GLYPH:
@@ -944,7 +949,7 @@ init_tilemap(void)
     }
 
     /* cmap B */
-    for (cmap = S_grave; cmap <= S_vibrating_square; cmap++) {
+    for (cmap = S_grave; cmap < S_arrow_trap + MAXTCHARS; cmap++) {
         i = cmap - S_grave;
         precheck((GLYPH_CMAP_B_OFF + i), "cmap B");
         tilemap[GLYPH_CMAP_B_OFF + i].tilenum = tilenum;
@@ -1341,22 +1346,32 @@ main(int argc UNUSED, char *argv[] UNUSED)
     Fprintf(ofp, "int maxmontile = %d,\n", lastmontile);
     Fprintf(ofp, "%smaxobjtile = %d,\n", indent, lastobjtile);
     Fprintf(ofp, "%smaxothtile = %d;\n\n", indent, lastothtile);
-    Fprintf(ofp,
-      "/* glyph, ttychar, { color, symidx, ovidx, glyphflags, tileidx} */\n");
+    Fprintf(ofp, 
+      "/* glyph, ttychar, { glyphflags, {color, symidx}, ovidx, tileidx, 0 } */\n");
     Fprintf(ofp, "const glyph_info nul_glyphinfo = { \n");
     Fprintf(ofp, "%sNO_GLYPH, ' ',\n", indent);
     Fprintf(ofp, "%s%s{  /* glyph_map */\n", indent, indent);
-    Fprintf(ofp, "%s%s%sNO_COLOR, SYM_UNEXPLORED + SYM_OFF_X,\n",
+    Fprintf(ofp, "%s%s%sMG_UNEXPL, { NO_COLOR, SYM_UNEXPLORED + SYM_OFF_X },\n",
             indent, indent, indent);
-    Fprintf(ofp, "%s%s%sMG_UNEXPL, %d\n", indent, indent, indent,
+#ifdef ENHANCED_SYMBOLS
+    Fprintf(ofp, "%s%s%s%d, 0\n", indent, indent, indent,
             TILE_unexplored);
+#else
+    Fprintf(ofp, "%s%s%s%d\n", indent, indent, indent,
+            TILE_unexplored);
+#endif
     Fprintf(ofp, "%s%s}\n", indent, indent);
     Fprintf(ofp, "};\n");
     Fprintf(ofp, "\nglyph_map glyphmap[MAX_GLYPH] = {\n");
 
     for (i = 0; i < MAX_GLYPH; i++) {
         tilenum = tilemap[i].tilenum;
-        Fprintf(ofp, "    { 0, 0, 0U, %4d },   /* [%04d] %s=%03d %s */\n",
+        Fprintf(ofp,
+#ifdef ENHANCED_SYMBOLS
+                "    { 0U, { 0, 0 }, %4d, 0 },   /* [%04d] %s:%03d %s */\n",
+#else
+                "    { 0U, { 0, 0 }, %4d},   /* [%04d] %s:%03d %s */\n",
+#endif
                 tilenum, i,
                 tilesrc_texts[tilelist[tilenum]->src],
                 tilelist[tilenum]->file_entry,
@@ -1416,7 +1431,7 @@ acceptable_tilename(int glyph_set, int idx, const char *encountered,
     };
 
     if (glyph_set == OTH_GLYPH) {
-        if (idx >= 0 && idx < SIZE(altlabels)) {
+        if (idx >= 0 && idx < (SIZE(altlabels) - 1)) {
             if (!strcmp(altlabels[idx].tilelabel, encountered))
                 return TRUE;
         }

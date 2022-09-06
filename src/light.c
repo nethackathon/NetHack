@@ -1,4 +1,4 @@
-/* NetHack 3.7	light.c	$NHDT-Date: 1604442297 2020/11/03 22:24:57 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.46 $ */
+/* NetHack 3.7	light.c	$NHDT-Date: 1657918094 2022/07/15 20:48:14 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.57 $ */
 /* Copyright (c) Dean Luick, 1994                                       */
 /* NetHack may be freely redistributed.  See license for details.       */
 
@@ -41,27 +41,27 @@
 #define LSF_SHOW 0x1        /* display the light source */
 #define LSF_NEEDS_FIXUP 0x2 /* need oid fixup */
 
-static light_source *new_light_core(xchar, xchar, int, int, anything *);
+static light_source *new_light_core(coordxy, coordxy, int, int, anything *);
 static void discard_flashes(void);
 static void write_ls(NHFILE *, light_source *);
 static int maybe_write_ls(NHFILE *, int, boolean);
 
 /* imported from vision.c, for small circles */
-extern xchar circle_data[];
-extern xchar circle_start[];
+extern coordxy circle_data[];
+extern coordxy circle_start[];
 
 
 /* Create a new light source.  Caller (and extern.h) doesn't need to know
    anything about type 'light_source'. */
 void
-new_light_source(xchar x, xchar y, int range, int type, anything *id)
+new_light_source(coordxy x, coordxy y, int range, int type, anything *id)
 {
     (void) new_light_core(x, y, range, type, id);
 }
 
 /* Create a new light source and return it.  Only used within this file. */
 static light_source *
-new_light_core(xchar x, xchar y, int range, int type, anything *id)
+new_light_core(coordxy x, coordxy y, int range, int type, anything *id)
 {
     light_source *ls;
 
@@ -69,7 +69,7 @@ new_light_core(xchar x, xchar y, int range, int type, anything *id)
         /* camera flash uses radius 0 and passes Null object */
         || (range == 0 && (type != LS_OBJECT || id->a_obj != 0))) {
         impossible("new_light_source:  illegal range %d", range);
-	return (light_source *) 0;
+        return (light_source *) 0;
     }
 
     ls = (light_source *) alloc(sizeof *ls);
@@ -134,13 +134,14 @@ del_light_source(int type, anything *id)
 
 /* Mark locations that are temporarily lit via mobile light sources. */
 void
-do_light_sources(xchar **cs_rows)
+do_light_sources(seenV **cs_rows)
 {
-    int x, y, min_x, max_x, max_y, offset;
-    xchar *limits;
+    coordxy x, y, min_x, max_x, max_y;
+    int offset;
+    coordxy *limits;
     short at_hero_range = 0;
     light_source *ls;
-    xchar *row;
+    seenV *row;
 
     for (ls = g.light_base; ls; ls = ls->next) {
         ls->flags &= ~LSF_SHOW;
@@ -221,7 +222,7 @@ do_light_sources(xchar **cs_rows)
    remember terrain, objects, and monsters being revealed;
    if 'obj' is Null, <x,y> is being hit by a camera's light flash */
 void
-show_transient_light(struct obj *obj, int x, int y)
+show_transient_light(struct obj *obj, coordxy x, coordxy y)
 {
     light_source *ls = 0;
     anything cameraflash;
@@ -621,7 +622,7 @@ any_light_source(void)
  * only for burning light sources.
  */
 void
-snuff_light_source(int x, int y)
+snuff_light_source(coordxy x, coordxy y)
 {
     light_source *ls;
     struct obj *obj;

@@ -1,4 +1,4 @@
-/* NetHack 3.7	do_name.c	$NHDT-Date: 1646870842 2022/03/10 00:07:22 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.239 $ */
+/* NetHack 3.7	do_name.c	$NHDT-Date: 1655663780 2022/06/19 18:36:20 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.254 $ */
 /* Copyright (c) Stichting Mathematisch Centrum, Amsterdam, 1985. */
 /*-Copyright (c) Pasi Kallinen, 2018. */
 /* NetHack may be freely redistributed.  See license for details. */
@@ -10,19 +10,16 @@ static void getpos_help_keyxhelp(winid, const char *, const char *, int);
 static void getpos_help(boolean, const char *);
 static int QSORTCALLBACK cmp_coord_distu(const void *, const void *);
 static int gloc_filter_classify_glyph(int);
-static int gloc_filter_floodfill_matcharea(int, int);
-static void gloc_filter_floodfill(int, int);
+static int gloc_filter_floodfill_matcharea(coordxy, coordxy);
+static void gloc_filter_floodfill(coordxy, coordxy);
 static void gloc_filter_init(void);
 static void gloc_filter_done(void);
-static boolean gather_locs_interesting(int, int, int);
+static boolean gather_locs_interesting(coordxy, coordxy, int);
 static void gather_locs(coord **, int *, int);
-static void auto_describe(int, int);
 static void truncate_to_map(int *, int *, schar, schar);
 static void do_mgivenname(void);
 static boolean alreadynamed(struct monst *, char *, char *);
 static void do_oname(struct obj *);
-static int name_ok(struct obj *);
-static int call_ok(struct obj *);
 static char *docall_xname(struct obj *);
 static void namefloorobj(void);
 
@@ -45,10 +42,10 @@ nextmbuf(void)
  * parameter value 0 = initialize, 1 = highlight, 2 = done
  */
 static void (*getpos_hilitefunc)(int) = (void (*)(int)) 0;
-static boolean (*getpos_getvalid)(int, int) = (boolean (*)(int, int)) 0;
+static boolean (*getpos_getvalid)(coordxy, coordxy) = (boolean (*)(coordxy, coordxy)) 0;
 
 void
-getpos_sethilite(void (*gp_hilitef)(int), boolean (*gp_getvalidf)(int, int))
+getpos_sethilite(void (*gp_hilitef)(int), boolean (*gp_getvalidf)(coordxy, coordxy))
 {
     getpos_hilitefunc = gp_hilitef;
     getpos_getvalid = gp_getvalidf;
@@ -138,6 +135,8 @@ getpos_help(boolean force, const char *goal)
                              visctrl(g.Cmd.spkeys[NHKF_GETPOS_MON_PREV]),
                              GLOC_MONS);
     }
+    if (goal && !strcmp(goal, "a monster"))
+        goto skip_non_mons;
     if (!iflags.terrainmode || (iflags.terrainmode & TER_OBJ) != 0) {
         getpos_help_keyxhelp(tmpwin,
                              visctrl(g.Cmd.spkeys[NHKF_GETPOS_OBJ_NEXT]),
@@ -197,8 +196,10 @@ getpos_help(boolean force, const char *goal)
         : "(Reset 'whatis_coord' option to omit coordinates from '%s' text.)",
                     visctrl(g.Cmd.spkeys[NHKF_GETPOS_AUTODESC]));
         }
+ skip_non_mons:
         /* disgusting hack; the alternate selection characters work for any
-           getpos call, but only matter for dowhatis (and doquickwhatis) */
+           getpos call, but only matter for dowhatis (and doquickwhatis,
+           also for dotherecmdmenu's simulated mouse) */
         doing_what_is = (goal == what_is_an_unknown_object);
         if (doing_what_is) {
             Sprintf(kbuf, "'%s' or '%s' or '%s' or '%s'",
@@ -220,7 +221,7 @@ getpos_help(boolean force, const char *goal)
             Sprintf(sbuf,
                     "  '%s' describe current spot,%s move to another spot;",
                     visctrl(g.Cmd.spkeys[NHKF_GETPOS_PICK]),
-                    flags.help ? " prompt if 'more info'," : "");
+                    flags.help && !force ? " prompt if 'more info'," : "");
             putstr(tmpwin, 0, sbuf);
             Sprintf(sbuf,
                     "  '%s' describe current spot, move to another spot;",
@@ -294,7 +295,7 @@ gloc_filter_classify_glyph(int glyph)
 }
 
 static int
-gloc_filter_floodfill_matcharea(int x, int y)
+gloc_filter_floodfill_matcharea(coordxy x, coordxy y)
 {
     int glyph = back_to_glyph(x, y);
 
@@ -312,7 +313,7 @@ gloc_filter_floodfill_matcharea(int x, int y)
 }
 
 static void
-gloc_filter_floodfill(int x, int y)
+gloc_filter_floodfill(coordxy x, coordxy y)
 {
     g.gloc_filter_floodfill_match_glyph = back_to_glyph(x, y);
 
@@ -354,7 +355,7 @@ gloc_filter_done(void)
 DISABLE_WARNING_UNREACHABLE_CODE
 
 static boolean
-gather_locs_interesting(int x, int y, int gloc)
+gather_locs_interesting(coordxy x, coordxy y, int gloc)
 {
     int glyph, sym;
 
@@ -427,7 +428,8 @@ RESTORE_WARNINGS
 static void
 gather_locs(coord **arr_p, int *cnt_p, int gloc)
 {
-    int x, y, pass, idx;
+    int pass, idx;
+    coordxy x, y;
 
     /*
      * We always include the hero's location even if there is no monster
@@ -468,7 +470,7 @@ gather_locs(coord **arr_p, int *cnt_p, int gloc)
 }
 
 char *
-dxdy_to_dist_descr(int dx, int dy, boolean fulldir)
+dxdy_to_dist_descr(coordxy dx, coordxy dy, boolean fulldir)
 {
     static char buf[30];
     int dst;
@@ -506,7 +508,7 @@ DISABLE_WARNING_FORMAT_NONLITERAL
 
 /* coordinate formatting for 'whatis_coord' option */
 char *
-coord_desc(int x, int y, char *outbuf, char cmode)
+coord_desc(coordxy x, coordxy y, char *outbuf, char cmode)
 {
     static char screen_fmt[16]; /* [12] suffices: "[%02d,%02d]" */
     int dx, dy;
@@ -550,8 +552,8 @@ coord_desc(int x, int y, char *outbuf, char cmode)
 
 RESTORE_WARNING_FORMAT_NONLITERAL
 
-static void
-auto_describe(int cx, int cy)
+void
+auto_describe(coordxy cx, coordxy cy)
 {
     coord cc;
     int sym = 0;
@@ -585,6 +587,7 @@ getpos_menu(coord *ccp, int gloc)
     int i, pick_cnt;
     menu_item *picks = (menu_item *) 0;
     char tmpbuf[BUFSZ];
+    int clr = 0;
 
     gather_locs(&garr, &gcount, gloc);
 
@@ -617,7 +620,7 @@ getpos_menu(coord *ccp, int gloc)
             Snprintf(fullbuf, sizeof fullbuf, "%s%s%s", firstmatch,
                     (*tmpbuf ? " " : ""), tmpbuf);
             add_menu(tmpwin, &nul_glyphinfo, &any, 0, 0,
-                     ATR_NONE, fullbuf, MENU_ITEMFLAGS_NONE);
+                     ATR_NONE, clr, fullbuf, MENU_ITEMFLAGS_NONE);
         }
     }
 
@@ -660,10 +663,11 @@ truncate_to_map(int *cx, int *cy, schar dx, schar dy)
     *cy += dy;
 }
 
+/* have the player use movement keystrokes to position the cursor at a
+   particular map location, then use one of [.,:;] to pick the spot */
 int
 getpos(coord *ccp, boolean force, const char *goal)
 {
-    const char *cp;
     static struct {
         int nhkf, ret;
     } const pick_chars_def[] = {
@@ -686,11 +690,14 @@ getpos(coord *ccp, boolean force, const char *goal)
         NHKF_GETPOS_VALID_NEXT,
         NHKF_GETPOS_VALID_PREV
     };
+    struct _cmd_queue cq, *cmdq;
+    const char *cp;
     char pick_chars[6];
     char mMoOdDxX[13];
     int result = 0;
     int cx, cy, i, c;
-    int sidx, tx = u.ux, ty = u.uy;
+    int sidx;
+    coordxy tx = u.ux, ty = u.uy;
     boolean msg_given = TRUE; /* clear message window by default */
     boolean show_goal_msg = FALSE;
     boolean hilite_state = FALSE;
@@ -700,6 +707,23 @@ getpos(coord *ccp, boolean force, const char *goal)
     schar udx = u.dx, udy = u.dy, udz = u.dz;
     int dx, dy;
     boolean rushrun = FALSE;
+
+    /* temporary? if we have a queued direction, return the adjacent spot
+       in that direction */
+    if (!g.in_doagain) {
+        if ((cmdq = cmdq_pop()) != 0) {
+            cq = *cmdq;
+            free((genericptr_t) cmdq);
+            if (cq.typ == CMDQ_DIR && !cq.dirz) {
+                ccp->x = u.ux + cq.dirx;
+                ccp->y = u.uy + cq.diry;
+            } else {
+                cmdq_clear(CQ_CANNED);
+                result = -1;
+            }
+            return result;
+        }
+    }
 
     for (i = 0; i < SIZE(pick_chars_def); i++)
         pick_chars[i] = g.Cmd.spkeys[pick_chars_def[i].nhkf];
@@ -711,7 +735,7 @@ getpos(coord *ccp, boolean force, const char *goal)
 
     if (!goal)
         goal = "desired location";
-    if (flags.verbose) {
+    if (Verbose(0, getpos1)) {
         pline("(For instructions type a '%s')",
               visctrl(g.Cmd.spkeys[NHKF_GETPOS_HELP]));
         msg_given = TRUE;
@@ -726,6 +750,7 @@ getpos(coord *ccp, boolean force, const char *goal)
 #ifdef MAC
     lock_mouse_cursor(TRUE);
 #endif
+    lock_mouse_buttons(TRUE);
     for (;;) {
         if (show_goal_msg) {
             pline("Move cursor to %s:", goal);
@@ -739,7 +764,20 @@ getpos(coord *ccp, boolean force, const char *goal)
         rushrun = FALSE;
 
         g.program_state.getting_a_command = 1;
-        c = readchar_poskey(&tx, &ty, &sidx);
+        if ((cmdq = cmdq_pop()) != 0) {
+            if (cmdq->typ == CMDQ_KEY) {
+                c = cmdq->key;
+            } else {
+                cmdq_clear(CQ_CANNED);
+                result = -1;
+                goto exitgetpos;
+            }
+            free(cmdq);
+        } else {
+            c = readchar_poskey(&tx, &ty, &sidx);
+            if (!g.in_doagain)
+                cmdq_add_key(CQ_REPEAT, c);
+        }
 
         if (hilite_state) {
             (*getpos_hilitefunc)(2);
@@ -823,7 +861,7 @@ getpos(coord *ccp, boolean force, const char *goal)
         } else if (c == g.Cmd.spkeys[NHKF_GETPOS_AUTODESC]) {
             iflags.autodescribe = !iflags.autodescribe;
             pline("Automatic description %sis %s.",
-                  flags.verbose ? "of features under cursor " : "",
+                  Verbose(0, getpos2) ? "of features under cursor " : "",
                   iflags.autodescribe ? "on" : "off");
             if (!iflags.autodescribe)
                 show_goal_msg = TRUE;
@@ -903,20 +941,17 @@ getpos(coord *ccp, boolean force, const char *goal)
                 int pass, lo_x, lo_y, hi_x, hi_y, k = 0;
 
                 (void) memset((genericptr_t) matching, 0, sizeof matching);
-                for (sidx = 1; sidx < MAXPCHARS; sidx++) { /* [0] left as 0 */
-                    if (IS_DOOR(sidx) || IS_WALL(sidx)
-                        || sidx == SDOOR || sidx == SCORR
-                        || glyph_to_cmap(k) == S_room
-                        || glyph_to_cmap(k) == S_darkroom
-                        || glyph_to_cmap(k) == S_corr
-                        || glyph_to_cmap(k) == S_litcorr)
+                for (sidx = 0; sidx < MAXPCHARS; sidx++) {
+                    /* don't even try to match some terrain: walls, room... */
+                    if (is_cmap_wall(sidx) || is_cmap_room(sidx)
+                        || is_cmap_corr(sidx) || is_cmap_door(sidx)
+                        || sidx == S_ndoor)
                         continue;
                     if (c == defsyms[sidx].sym
                         || c == (int) g.showsyms[sidx]
                         /* have '^' match webs and vibrating square or any
                            other trap that uses something other than '^' */
-                        || (c == '^' && (is_cmap_trap(sidx)
-                                         || sidx == S_vibrating_square)))
+                        || (c == '^' && is_cmap_trap(sidx)))
                         matching[sidx] = (char) ++k;
                 }
                 if (k) {
@@ -1002,9 +1037,11 @@ getpos(coord *ccp, boolean force, const char *goal)
         curs(WIN_MAP, cx, cy);
         flush_screen(0);
     }
+ exitgetpos:
 #ifdef MAC
     lock_mouse_cursor(FALSE);
 #endif
+    lock_mouse_buttons(FALSE);
     if (msg_given)
         clear_nhwindow(WIN_MESSAGE);
     ccp->x = cx;
@@ -1013,7 +1050,7 @@ getpos(coord *ccp, boolean force, const char *goal)
         if (garr[i])
             free((genericptr_t) garr[i]);
     getpos_hilitefunc = (void (*)(int)) 0;
-    getpos_getvalid = (boolean (*)(int, int)) 0;
+    getpos_getvalid = (boolean (*)(coordxy, coordxy)) 0;
     u.dx = udx, u.dy = udy, u.dz = udz;
     return result;
 }
@@ -1231,11 +1268,11 @@ do_mgivenname(void)
  * allocates a replacement object, so that old risk is gone.
  */
 static void
-do_oname(register struct obj *obj)
+do_oname(struct obj *obj)
 {
     char *bufp, buf[BUFSZ], bufcpy[BUFSZ], qbuf[QBUFSZ];
     const char *aname;
-    short objtyp;
+    short objtyp = STRANGE_OBJECT;
 
     /* Do this now because there's no point in even asking for a name */
     if (obj->otyp == SPE_NOVEL) {
@@ -1268,15 +1305,21 @@ do_oname(register struct obj *obj)
      * Orcrist, clearly being literate (no pun intended...).
      */
 
+    if (obj->oartifact) {
+        /* this used to give "The artifact seems to resist the attempt."
+           but resisting is definite, no "seems to" about it */
+        pline("%s resists the attempt.",
+              /* any artifact should always pass the has_oname() test
+                 but be careful just in case */
+              has_oname(obj) ? ONAME(obj) : "The artifact");
+        return;
+    }
+
     /* relax restrictions over proper capitalization for artifacts */
     if ((aname = artifact_name(buf, &objtyp, TRUE)) != 0
-        && objtyp == obj->otyp)
+        && (restrict_name(obj, aname) || exist_artifact(obj->otyp, aname))) {
+        /* substitute canonical spelling before slippage */
         Strcpy(buf, aname);
-
-    if (obj->oartifact) {
-        pline_The("artifact seems to resist the attempt.");
-        return;
-    } else if (restrict_name(obj, buf) || exist_artifact(obj->otyp, buf)) {
         /* this used to change one letter, substituting a value
            of 'a' through 'y' (due to an off by one error, 'z'
            would never be selected) and then force that to
@@ -1290,9 +1333,9 @@ do_oname(register struct obj *obj)
            because buf[] matches a valid artifact name) */
         Strcpy(bufcpy, buf);
         /* for "the Foo of Bar", only scuff "Foo of Bar" part */
-        bufp = !strncmpi(bufcpy, "the ", 4) ? (buf + 4) : buf;
+        bufp = !strncmpi(buf, "the ", 4) ? (buf + 4) : buf;
         do {
-            wipeout_text(bufp, rn2_on_display_rng(2), (unsigned) 0);
+            wipeout_text(bufp, rnd_on_display_rng(2), (unsigned) 0);
         } while (!strcmp(buf, bufcpy));
         pline("While engraving, your %s slips.", body_part(HAND));
         display_nhwindow(WIN_MESSAGE, FALSE);
@@ -1300,8 +1343,15 @@ do_oname(register struct obj *obj)
         /* violate illiteracy conduct since hero attempted to write
            a valid artifact name */
         u.uconduct.literate++;
+    } else if (obj->otyp == objtyp) {
+        /* artifact_name() found a match and restrict_name() didn't reject
+           it; since 'obj' is the right type, naming will change it into an
+           artifact so use canonical capitalization (Sting or Orcrist) */
+        Strcpy(buf, aname);
     }
+
     obj = oname(obj, buf, ONAME_VIA_NAMING | ONAME_KNOW_ARTI);
+    nhUse(obj);
 }
 
 struct obj *
@@ -1367,11 +1417,21 @@ objtyp_is_callable(int i)
         return TRUE;
 
     switch(objects[i].oc_class) {
+    case AMULET_CLASS:
+        /* 3.7: calling these used to be allowed but that enabled the
+           player to tell whether two unID'd amulets of yendor were both
+           fake or one was real by calling them distinct names and then
+           checking discoveries to see whether first name was replaced
+           by second or both names stuck; with more than two available
+           to work with, if they weren't all fake it was possible to
+           determine which one was the real one */
+        if (i == AMULET_OF_YENDOR || i == FAKE_AMULET_OF_YENDOR)
+            break; /* return FALSE */
+        /*FALLTHRU*/
     case SCROLL_CLASS:
     case POTION_CLASS:
     case WAND_CLASS:
     case RING_CLASS:
-    case AMULET_CLASS:
     case GEM_CLASS:
     case SPBOOK_CLASS:
     case ARMOR_CLASS:
@@ -1387,17 +1447,20 @@ objtyp_is_callable(int i)
 }
 
 /* getobj callback for object to name (specific item) - anything but gold */
-static int
+int
 name_ok(struct obj *obj)
 {
     if (!obj || obj->oclass == COIN_CLASS)
         return GETOBJ_EXCLUDE;
 
+    if (!obj->dknown || obj->oartifact || obj->otyp == SPE_NOVEL)
+        return GETOBJ_DOWNPLAY;
+
     return GETOBJ_SUGGEST;
 }
 
 /* getobj callback for object to call (name its type) */
-static int
+int
 call_ok(struct obj *obj)
 {
     if (!obj || !objtyp_is_callable(obj->otyp))
@@ -1414,39 +1477,50 @@ docallcmd(void)
     winid win;
     anything any;
     menu_item *pick_list = 0;
-    char ch;
+    struct _cmd_queue cq, *cmdq;
+    char ch = 0;
     /* if player wants a,b,c instead of i,o when looting, do that here too */
     boolean abc = flags.lootabc;
+    int clr = 0;
 
+    if ((cmdq = cmdq_pop()) != 0) {
+        cq = *cmdq;
+        free((genericptr_t) cmdq);
+        if (cq.typ == CMDQ_KEY)
+            ch = cq.key;
+        else
+            cmdq_clear(CQ_CANNED);
+        goto docallcmd;
+    }
     win = create_nhwindow(NHW_MENU);
     start_menu(win, MENU_BEHAVE_STANDARD);
     any = cg.zeroany;
     any.a_char = 'm'; /* group accelerator 'C' */
     add_menu(win, &nul_glyphinfo, &any, abc ? 0 : any.a_char, 'C',
-             ATR_NONE, "a monster", MENU_ITEMFLAGS_NONE);
+             ATR_NONE, clr, "a monster", MENU_ITEMFLAGS_NONE);
     if (g.invent) {
         /* we use y and n as accelerators so that we can accept user's
            response keyed to old "name an individual object?" prompt */
         any.a_char = 'i'; /* group accelerator 'y' */
         add_menu(win, &nul_glyphinfo, &any, abc ? 0 : any.a_char, 'y',
-                 ATR_NONE, "a particular object in inventory",
+                 ATR_NONE, clr, "a particular object in inventory",
                  MENU_ITEMFLAGS_NONE);
         any.a_char = 'o'; /* group accelerator 'n' */
         add_menu(win, &nul_glyphinfo, &any, abc ? 0 : any.a_char, 'n',
-                 ATR_NONE, "the type of an object in inventory",
+                 ATR_NONE, clr, "the type of an object in inventory",
                  MENU_ITEMFLAGS_NONE);
     }
     any.a_char = 'f'; /* group accelerator ',' (or ':' instead?) */
     add_menu(win, &nul_glyphinfo, &any, abc ? 0 : any.a_char, ',',
-             ATR_NONE, "the type of an object upon the floor",
+             ATR_NONE, clr, "the type of an object upon the floor",
              MENU_ITEMFLAGS_NONE);
     any.a_char = 'd'; /* group accelerator '\' */
     add_menu(win, &nul_glyphinfo, &any, abc ? 0 : any.a_char, '\\',
-             ATR_NONE, "the type of an object on discoveries list",
+             ATR_NONE, clr, "the type of an object on discoveries list",
              MENU_ITEMFLAGS_NONE);
     any.a_char = 'a'; /* group accelerator 'l' */
     add_menu(win, &nul_glyphinfo, &any, abc ? 0 : any.a_char, 'l',
-             ATR_NONE, "record an annotation for the current level",
+             ATR_NONE, clr, "record an annotation for the current level",
              MENU_ITEMFLAGS_NONE);
     end_menu(win, "What do you want to name?");
     if (select_menu(win, PICK_ONE, &pick_list) > 0) {
@@ -1456,6 +1530,7 @@ docallcmd(void)
         ch = 'q';
     destroy_nhwindow(win);
 
+ docallcmd:
     switch (ch) {
     default:
     case 'q':
@@ -1733,9 +1808,8 @@ x_monnam(
     struct permonst *mdat = mtmp->data;
     const char *pm_name = mon_pmname(mtmp);
     boolean do_hallu, do_invis, do_it, do_saddle, do_name, augment_it;
-    boolean name_at_start, has_adjectives,
-            falseCap = (*pm_name != lowc(*pm_name));
-    char *bp;
+    boolean name_at_start, has_adjectives, insertbuf2;
+    char *bp, buf2[BUFSZ];
 
     if (mtmp == &g.youmonst)
         return strcpy(buf, "you"); /* ignore article, "invisible", &c */
@@ -1767,7 +1841,6 @@ x_monnam(
 
     /* priests and minions: don't even use this function */
     if (mtmp->ispriest || mtmp->isminion) {
-        char priestnambuf[BUFSZ] = DUMMY;
         char *name;
         long save_prop = EHalluc_resistance;
         unsigned save_invis = mtmp->minvis;
@@ -1777,14 +1850,14 @@ x_monnam(
             EHalluc_resistance = 1L;
         if (!do_invis)
             mtmp->minvis = 0;
-        name = priestname(mtmp, article, priestnambuf);
+        name = priestname(mtmp, article, buf2);
         EHalluc_resistance = save_prop;
         mtmp->minvis = save_invis;
         if (article == ARTICLE_NONE && !strncmp(name, "the ", 4))
             name += 4;
         return strcpy(buf, name);
     }
-#if 0
+#if 0   /* [now handled by mon_pmname()] */
     /* an "aligned priest" not flagged as a priest or minion should be
        "priest" or "priestess" (normally handled by priestname()) */
     if (mdat == &mons[PM_ALIGNED_CLERIC])
@@ -1805,15 +1878,15 @@ x_monnam(
             Strcpy(buf, "the ");
             Strcat(strcat(buf, adjective), " ");
             Strcat(buf, shkname(mtmp));
-            return buf;
+        } else {
+            Strcat(buf, shkname(mtmp));
+            if (mdat != &mons[PM_SHOPKEEPER] || do_invis){
+                Strcat(buf, " the ");
+                if (do_invis)
+                    Strcat(buf, "invisible ");
+                Strcat(buf, pm_name);
+            }
         }
-        Strcat(buf, shkname(mtmp));
-        if (mdat == &mons[PM_SHOPKEEPER] && !do_invis)
-            return buf;
-        Strcat(buf, " the ");
-        if (do_invis)
-            Strcat(buf, "invisible ");
-        Strcat(buf, pm_name);
         return buf;
     }
 
@@ -1881,37 +1954,29 @@ x_monnam(
         article = ARTICLE_THE;
     }
 
-    if (article == ARTICLE_A && falseCap && !name_at_start) {
-        char buf2[BUFSZ], buf3[BUFSZ];
-
-        /* some type names like "Archon", "Green-elf", and "Uruk-hai" fool
-           an() because of the capitalization and would result in "the " */
-        Strcpy(buf3, buf);
-        *buf3 = lowc(*buf3);
-        (void) just_an(buf2, buf3);
-        Strcat(buf2, buf);
-        return strcpy(buf, buf2);
-    } else {
-        char buf2[BUFSZ];
-
-        switch (article) {
-        case ARTICLE_YOUR:
-            Strcpy(buf2, "your ");
-            Strcat(buf2, buf);
-            Strcpy(buf, buf2);
-            return buf;
-        case ARTICLE_THE:
-            Strcpy(buf2, "the ");
-            Strcat(buf2, buf);
-            Strcpy(buf, buf2);
-            return buf;
-        case ARTICLE_A:
-            return an(buf);
-        case ARTICLE_NONE:
-        default:
-            return buf;
-        }
+    insertbuf2 = TRUE;
+    buf2[0] = '\0'; /* lint suppression */
+    switch (article) {
+    case ARTICLE_YOUR:
+        Strcpy(buf2, "your ");
+        break;
+    case ARTICLE_THE:
+        Strcpy(buf2, "the ");
+        break;
+    case ARTICLE_A:
+        /* avoid an() here */
+        (void) just_an(buf2, buf); /* copy "a " or "an " into buf2[] */
+        break;
+    case ARTICLE_NONE:
+    default:
+        insertbuf2 = FALSE;
+        break;
     }
+    if (insertbuf2) {
+        Strcat(buf2, buf); /* buf2[] isn't viable to return,  */
+        Strcpy(buf, buf2); /* so transfer the result to buf[] */
+    }
+    return buf;
 }
 
 char *
@@ -2140,7 +2205,7 @@ minimal_monnam(struct monst *mon, boolean ckloc)
         Sprintf(outbuf, "[Invalid mon->data %s >= %s]",
                 fmt_ptr((genericptr_t) mon->data),
                 fmt_ptr((genericptr_t) &mons[NUMMONS]));
-    } else if (ckloc && ptr == &mons[PM_LONG_WORM]
+    } else if (ckloc && ptr == &mons[PM_LONG_WORM] && mon->mx
                && g.level.monsters[mon->mx][mon->my] != mon) {
         Sprintf(outbuf, "%s <%d,%d>",
                 pmname(&mons[PM_LONG_WORM_TAIL], Mgender(mon)),
@@ -2209,10 +2274,24 @@ obj_pmname(struct obj *obj)
         int cgend = (obj->spe & CORPSTAT_GENDER),
             mgend = ((cgend == CORPSTAT_MALE) ? MALE
                      : (cgend == CORPSTAT_FEMALE) ? FEMALE
-                       : NEUTRAL);
+                       : NEUTRAL),
+            mndx = obj->corpsenm;
 
-        return pmname(&mons[obj->corpsenm], mgend);
+        /* mons[].pmnames[] for monster cleric uses "priest" or "priestess"
+           or "aligned cleric"; we want to avoid "aligned cleric [corpse]"
+           unless it has been explicitly flagged as neuter rather than
+           defaulting to random (which fails male or female check above);
+           role monster cleric uses "priest" or "priestess" or "cleric"
+           without "aligned" prefix so we switch to that; [can't force
+           random gender to be chosen here because splitting a stack of
+           corpses could cause the split-off portion to change gender, so
+           settle for avoiding "aligned"] */
+        if (mndx == PM_ALIGNED_CLERIC && cgend == CORPSTAT_RANDOM)
+            mndx = PM_CLERIC;
+
+        return pmname(&mons[mndx], mgend);
     }
+    impossible("obj_pmname otyp:%i,corpsenm:%i", obj->otyp, obj->corpsenm);
     return "two-legged glorkum-seeker";
 }
 

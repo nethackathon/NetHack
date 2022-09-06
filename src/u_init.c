@@ -150,7 +150,7 @@ static struct trobj Tourist[] = {
     { 0, 0, 0, 0, 0 }
 };
 static struct trobj Valkyrie[] = {
-    { LONG_SWORD, 1, WEAPON_CLASS, 1, UNDEF_BLESS },
+    { SPEAR, 1, WEAPON_CLASS, 1, UNDEF_BLESS },
     { DAGGER, 0, WEAPON_CLASS, 1, UNDEF_BLESS },
     { SMALL_SHIELD, 3, ARMOR_CLASS, 1, UNDEF_BLESS },
     { FOOD_RATION, 0, FOOD_CLASS, 1, 0 },
@@ -237,7 +237,6 @@ static const struct def_skill Skill_A[] = {
     { P_KNIFE, P_BASIC },
     { P_PICK_AXE, P_EXPERT },
     { P_SHORT_SWORD, P_BASIC },
-    { P_SCIMITAR, P_SKILLED },
     { P_SABER, P_EXPERT },
     { P_CLUB, P_SKILLED },
     { P_QUARTERSTAFF, P_SKILLED },
@@ -263,8 +262,7 @@ static const struct def_skill Skill_B[] = {
     { P_BROAD_SWORD, P_SKILLED },
     { P_LONG_SWORD, P_SKILLED },
     { P_TWO_HANDED_SWORD, P_EXPERT },
-    { P_SCIMITAR, P_SKILLED },
-    { P_SABER, P_BASIC },
+    { P_SABER, P_SKILLED },
     { P_CLUB, P_SKILLED },
     { P_MACE, P_SKILLED },
     { P_MORNING_STAR, P_SKILLED },
@@ -308,7 +306,6 @@ static const struct def_skill Skill_H[] = {
     { P_DAGGER, P_SKILLED },
     { P_KNIFE, P_EXPERT },
     { P_SHORT_SWORD, P_SKILLED },
-    { P_SCIMITAR, P_BASIC },
     { P_SABER, P_BASIC },
     { P_CLUB, P_SKILLED },
     { P_MACE, P_BASIC },
@@ -333,7 +330,6 @@ static const struct def_skill Skill_K[] = {
     { P_BROAD_SWORD, P_SKILLED },
     { P_LONG_SWORD, P_EXPERT },
     { P_TWO_HANDED_SWORD, P_SKILLED },
-    { P_SCIMITAR, P_BASIC },
     { P_SABER, P_SKILLED },
     { P_CLUB, P_BASIC },
     { P_MACE, P_SKILLED },
@@ -400,7 +396,6 @@ static const struct def_skill Skill_R[] = {
     { P_BROAD_SWORD, P_SKILLED },
     { P_LONG_SWORD, P_SKILLED },
     { P_TWO_HANDED_SWORD, P_BASIC },
-    { P_SCIMITAR, P_SKILLED },
     { P_SABER, P_SKILLED },
     { P_CLUB, P_SKILLED },
     { P_MACE, P_SKILLED },
@@ -454,7 +449,6 @@ static const struct def_skill Skill_S[] = {
     { P_BROAD_SWORD, P_SKILLED },
     { P_LONG_SWORD, P_EXPERT },
     { P_TWO_HANDED_SWORD, P_EXPERT },
-    { P_SCIMITAR, P_BASIC },
     { P_SABER, P_BASIC },
     { P_FLAIL, P_SKILLED },
     { P_QUARTERSTAFF, P_BASIC },
@@ -480,7 +474,6 @@ static const struct def_skill Skill_T[] = {
     { P_BROAD_SWORD, P_BASIC },
     { P_LONG_SWORD, P_BASIC },
     { P_TWO_HANDED_SWORD, P_BASIC },
-    { P_SCIMITAR, P_SKILLED },
     { P_SABER, P_SKILLED },
     { P_MACE, P_BASIC },
     { P_MORNING_STAR, P_BASIC },
@@ -515,12 +508,11 @@ static const struct def_skill Skill_V[] = {
     { P_BROAD_SWORD, P_SKILLED },
     { P_LONG_SWORD, P_EXPERT },
     { P_TWO_HANDED_SWORD, P_EXPERT },
-    { P_SCIMITAR, P_BASIC },
     { P_SABER, P_BASIC },
     { P_HAMMER, P_EXPERT },
     { P_QUARTERSTAFF, P_BASIC },
     { P_POLEARMS, P_SKILLED },
-    { P_SPEAR, P_SKILLED },
+    { P_SPEAR, P_EXPERT },
     { P_TRIDENT, P_BASIC },
     { P_LANCE, P_SKILLED },
     { P_SLING, P_BASIC },
@@ -1007,7 +999,7 @@ ini_inv(struct trobj *trop)
     int otyp, i;
     boolean got_sp1 = FALSE; /* got a level 1 spellbook? */
 
-	while (trop->trclass) {
+    while (trop->trclass) {
         otyp = (int) trop->trotyp;
         if (otyp != UNDEF_TYP) {
             obj = mksobj(otyp, TRUE, FALSE);
@@ -1058,10 +1050,6 @@ ini_inv(struct trobj *trop)
                     break;
             }
 
-            /* Don't start with +0 or negative rings */
-            if (objects[otyp].oc_charged && obj->spe <= 0)
-                obj->spe = rne(3);
-
             /* Heavily relies on the fact that 1) we create wands
              * before rings, 2) that we create rings before
              * spellbooks, and that 3) not more than 1 object of a
@@ -1082,10 +1070,14 @@ ini_inv(struct trobj *trop)
             /* Don't have 2 of the same ring or spellbook */
             if (obj->oclass == RING_CLASS || obj->oclass == SPBOOK_CLASS)
                 g.nocreate4 = otyp;
-            /* First spellbook should be level 1 - did we get it? */
-            if (obj->oclass == SPBOOK_CLASS && objects[obj->otyp].oc_level == 1)
-                got_sp1 = TRUE;
         }
+        /* Put post-creation object adjustments that don't depend on whether it
+         * was UNDEF_TYP or not after this. */
+
+        /* Don't start with +0 or negative rings */
+        if (objects[otyp].oc_class == RING_CLASS && objects[otyp].oc_charged
+            && obj->spe <= 0)
+            obj->spe = rne(3);
 
         if (g.urace.mnum != PM_HUMAN) {
             /* substitute race-specific items; this used to be in
@@ -1182,6 +1174,10 @@ ini_inv(struct trobj *trop)
         }
         if (obj->oclass == SPBOOK_CLASS && obj->otyp != SPE_BLANK_PAPER)
             initialspell(obj);
+
+        /* First spellbook should be level 1 - did we get it? */
+        if (obj->oclass == SPBOOK_CLASS && objects[obj->otyp].oc_level == 1)
+            got_sp1 = TRUE;
 
         if (--trop->trquan)
             continue; /* make a similar object */

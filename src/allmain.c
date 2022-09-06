@@ -1,4 +1,4 @@
-/* NetHack 3.7	allmain.c	$NHDT-Date: 1646136934 2022/03/01 12:15:34 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.178 $ */
+/* NetHack 3.7	allmain.c	$NHDT-Date: 1652831519 2022/05/17 23:51:59 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.185 $ */
 /* Copyright (c) Stichting Mathematisch Centrum, Amsterdam, 1985. */
 /*-Copyright (c) Robert Patrick Rankin, 2012. */
 /* NetHack may be freely redistributed.  See license for details. */
@@ -68,6 +68,7 @@ moveloop_preamble(boolean resuming)
     g.context.botlx = TRUE; /* for STATUS_HILITES */
     if (resuming) { /* restoring old game */
         read_engr_at(u.ux, u.uy); /* subset of pickup() */
+        fix_shop_damage();
     }
 
     (void) encumber_msg(); /* in case they auto-picked up something */
@@ -266,7 +267,7 @@ moveloop_core(void)
 
                 if (!u.uinvulnerable) {
                     if (Teleportation && !rn2(85)) {
-                        xchar old_ux = u.ux, old_uy = u.uy;
+                        coordxy old_ux = u.ux, old_uy = u.uy;
 
                         tele();
                         if (u.ux != old_ux || u.uy != old_uy) {
@@ -274,8 +275,8 @@ moveloop_core(void)
                                 check_leash(old_ux, old_uy);
                             }
                             /* clear doagain keystrokes */
-                            pushch(0);
-                            savech(0);
+                            cmdq_clear(CQ_CANNED);
+                            cmdq_clear(CQ_REPEAT);
                         }
                     }
                     /* delayed change may not be valid anymore */
@@ -291,7 +292,7 @@ moveloop_core(void)
                         if (g.multi >= 0) {
                             stop_occupation();
                             if (mvl_change == 1)
-                                polyself(0);
+                                polyself(POLY_NOFLAGS);
                             else
                                 you_were();
                             mvl_change = 0;
@@ -430,7 +431,7 @@ moveloop_core(void)
             if ((ch = pgetchar()) == ABORT)
                 mvl_abort_lev++;
             else
-                pushch(ch);
+                cmdq_add_key(CQ_CANNED, ch);
         }
         if (!mvl_abort_lev && (*g.occupation)() == 0)
 #else
@@ -466,8 +467,7 @@ moveloop_core(void)
         }
         if (g.context.mv) {
             if (g.multi < COLNO && !--g.multi)
-                g.context.travel = g.context.travel1 = g.context.mv =
-                    g.context.run = 0;
+                end_running(TRUE);
             domove();
         } else {
             --g.multi;
@@ -609,16 +609,17 @@ stop_occupation(void)
         g.occupation = 0;
         g.context.botl = TRUE; /* in case u.uhs changed */
         nomul(0);
-        pushch(0);
     } else if (g.multi >= 0) {
         nomul(0);
     }
-    cmdq_clear();
+    cmdq_clear(CQ_CANNED);
 }
 
 void
 display_gamewindows(void)
 {
+    int menu_behavior = MENU_BEHAVE_STANDARD;
+
     WIN_MESSAGE = create_nhwindow(NHW_MESSAGE);
     if (VIA_WINDOWPORT()) {
         status_initialize(0);
@@ -627,9 +628,15 @@ display_gamewindows(void)
     }
     WIN_MAP = create_nhwindow(NHW_MAP);
     WIN_INVEN = create_nhwindow(NHW_MENU);
+#ifdef TTY_PERM_INVENT
+    if (WINDOWPORT(tty) && WIN_INVEN != WIN_ERR) {
+        menu_behavior = MENU_BEHAVE_PERMINV;
+        prepare_perminvent(WIN_INVEN);
+    }
+#endif
     /* in case of early quit where WIN_INVEN could be destroyed before
        ever having been used, use it here to pacify the Qt interface */
-    start_menu(WIN_INVEN, 0U), end_menu(WIN_INVEN, (char *) 0);
+    start_menu(WIN_INVEN, menu_behavior), end_menu(WIN_INVEN, (char *) 0);
 
 #ifdef MAC
     /* This _is_ the right place for this - maybe we will
@@ -650,7 +657,7 @@ display_gamewindows(void)
     display_nhwindow(WIN_MESSAGE, FALSE);
     clear_glyph_buffer();
     display_nhwindow(WIN_MAP, FALSE);
-}
+ }
 
 void
 newgame(void)
@@ -680,7 +687,7 @@ newgame(void)
                        * any artifacts */
     u_init();
 
-    l_nhcore_init();
+    l_nhcore_init();	/* create a Lua state that lasts until the end of the game */
     reset_glyphmap(gm_newgame);
 #ifndef NO_SIGNAL
     (void) signal(SIGINT, (SIG_RET_TYPE) done1);
@@ -727,6 +734,8 @@ welcome(boolean new_game) /* false => restoring an old game */
     char buf[BUFSZ];
     boolean currentgend = Upolyd ? u.mfemale : flags.female;
 
+    l_nhcore_call(new_game ? NHCORE_START_NEW_GAME : NHCORE_RESTORE_OLD_GAME);
+
     /* skip "welcome back" if restoring a doomed character */
     if (!new_game && Upolyd && ugenocided()) {
         /* death via self-genocide is pending */
@@ -760,10 +769,15 @@ welcome(boolean new_game) /* false => restoring an old game */
                    : "%s %s, the%s, welcome back to NetHack!",
           Hello((struct monst *) 0), g.plname, buf);
 
-    l_nhcore_call(new_game ? NHCORE_START_NEW_GAME : NHCORE_RESTORE_OLD_GAME);
-    if (new_game) /* guarantee that 'major' event category is never empty */
+    if (new_game) {
+        /* guarantee that 'major' event category is never empty */
         livelog_printf(LL_ACHIEVE, "%s the%s entered the dungeon",
                        g.plname, buf);
+    } else {
+        /* if restroing in Gehennom, give same hot/smoky message as when
+           first entering it */
+        hellish_smoke_mesg();
+    }
 }
 
 #ifdef POSITIONBAR
@@ -805,7 +819,7 @@ interrupt_multi(const char *msg)
 {
     if (g.multi > 0 && !g.context.travel && !g.context.run) {
         nomul(0);
-        if (flags.verbose && msg)
+        if (Verbose(0,interrupt_multi) && msg)
             Norep("%s", msg);
     }
 }
@@ -829,7 +843,10 @@ static const struct early_opt earlyopts[] = {
     {ARG_SHOWPATHS, "showpaths", 9, FALSE},
 #ifndef NODUMPENUMS
     {ARG_DUMPENUMS, "dumpenums", 9, FALSE},
+#ifdef ENHANCED_SYMBOLS
+    {ARG_DUMPGLYPHIDS, "dumpglyphids", 12, FALSE},
 #endif
+#endif /* NODUMPENUMS */
 #ifdef WIN32
     {ARG_WINDOWS, "windows", 4, TRUE},
 #endif
@@ -913,7 +930,13 @@ argcheck(int argc, char *argv[], enum earlyarg e_arg)
             dump_enums();
             return 2;
         }
+#ifdef ENHANCED_SYMBOLS
+        case ARG_DUMPGLYPHIDS: {
+            dump_glyphids();
+            return 2;
+        }
 #endif
+#endif /* NODUMPENUMS */
 #ifdef WIN32
         case ARG_WINDOWS: {
             if (extended_opt) {
@@ -1006,6 +1029,17 @@ timet_delta(time_t etim, time_t stim) /* end and start times */
 }
 
 #ifndef NODUMPENUMS
+#define DUMP_ENUMS
+struct enum_dump monsdump[] = {
+#include "monsters.h"
+        { NUMMONS, "NUMMONS" },
+};
+struct enum_dump objdump[] = {
+#include "objects.h"
+        { NUM_OBJECTS, "NUM_OBJECTS" },
+};
+#undef DUMP_ENUMS
+
 void
 dump_enums(void)
 {
@@ -1018,21 +1052,6 @@ dump_enums(void)
     };
     static const char *const titles[NUM_ENUM_DUMPS] =
         { "monnums", "objects_nums" , "misc_object_nums" };
-    struct enum_dump {
-        int val;
-        const char *nm;
-    };
-
-#define DUMP_ENUMS
-    struct enum_dump monsdump[] = {
-#include "monsters.h"
-        { NUMMONS, "NUMMONS" },
-    };
-    struct enum_dump objdump[] = {
-#include "objects.h"
-        { NUM_OBJECTS, "NUM_OBJECTS" },
-    };
-#undef DUMP_ENUMS
 
     struct enum_dump omdump[] = {
             { LAST_GEM, "LAST_GEM" },
@@ -1058,6 +1077,14 @@ dump_enums(void)
     }
     raw_print("");
 }
+
+#ifdef ENHANCED_SYMBOLS
+void
+dump_glyphids(void)
+{
+    dump_all_glyphids(stdout);
+}
+#endif /* ENHANCED_SYMBOLS */
 #endif /* NODUMPENUMS */
 
 /*allmain.c*/

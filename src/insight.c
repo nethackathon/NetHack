@@ -1,4 +1,4 @@
-/* NetHack 3.7	insight.c	$NHDT-Date: 1646428012 2022/03/04 21:06:52 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.56 $ */
+/* NetHack 3.7	insight.c	$NHDT-Date: 1650875487 2022/04/25 08:31:27 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.60 $ */
 /* Copyright (c) Stichting Mathematisch Centrum, Amsterdam, 1985. */
 /* NetHack may be freely redistributed.  See license for details. */
 
@@ -113,11 +113,13 @@ static struct ll_achieve_msg achieve_msg [] = {
 static void
 enlght_out(const char *buf)
 {
+    int clr = 0;
+
     if (g.en_via_menu) {
         anything any;
 
         any = cg.zeroany;
-        add_menu(g.en_win, &nul_glyphinfo, &any, 0, 0, ATR_NONE, buf,
+        add_menu(g.en_win, &nul_glyphinfo, &any, 0, 0, ATR_NONE, clr, buf,
                  MENU_ITEMFLAGS_NONE);
     } else
         putstr(g.en_win, 0, buf);
@@ -199,8 +201,7 @@ walking_on_water(void)
 {
     if (u.uinwater || Levitation || Flying)
         return FALSE;
-    return (boolean) (Wwalking
-                      && (is_pool(u.ux, u.uy) || is_lava(u.ux, u.uy)));
+    return (boolean) (Wwalking && is_pool_or_lava(u.ux, u.uy));
 }
 
 /* describe u.utraptype; used by status_enlightenment() and self_lookat() */
@@ -800,7 +801,7 @@ one_characteristic(int mode, int final, int attrindx)
     case A_DEX:
         break;
     case A_CON:
-        if (uwep && uwep->oartifact == ART_OGRESMASHER && uwep->cursed)
+        if (u_wield_art(ART_OGRESMASHER) && uwep->cursed)
             hide_innate_value = TRUE;
         break;
     case A_INT:
@@ -1035,7 +1036,7 @@ status_enlightenment(int mode, int final)
     }
     if (u.uswallow) { /* implies u.ustuck is non-Null */
         Snprintf(buf, sizeof buf, "%s by %s",
-                is_animal(u.ustuck->data) ? "swallowed" : "engulfed",
+                digests(u.ustuck->data) ? "swallowed" : "engulfed",
                 heldmon);
         if (dmgtype(u.ustuck->data, AD_DGST)) {
             /* if final, death via digestion can be deduced by u.uswallow
@@ -1203,13 +1204,7 @@ weapon_insight(int final)
     /* report being weaponless; distinguish whether gloves are worn
        [perhaps mention silver ring(s) when not wearning gloves?] */
     if (!uwep) {
-        you_are(uarmg ? "empty handed" /* gloves imply hands */
-                      : humanoid(g.youmonst.data)
-                         /* hands but no weapon and no gloves */
-                         ? "bare handed"
-                         /* alternate phrasing for paws or lack of hands */
-                         : "not wielding anything",
-                "");
+        you_are(empty_handed(), "");
 
     /* two-weaponing implies hands and
        a weapon or wep-tool (not other odd stuff) in each hand */
@@ -1649,6 +1644,23 @@ attributes_enlightenment(int unused_mode UNUSED, int final)
         }
         BFlying = save_BFly;
     }
+    /* including this might bring attention to the fact that ceiling
+       clinging has inconsistencies... */
+    if (is_clinger(g.youmonst.data)) {
+        boolean has_lid = has_ceiling(&u.uz);
+
+        if (has_lid && !u.uinwater) {
+            you_can("cling to the ceiling", "");
+        } else {
+            Sprintf(buf, " to the ceiling if %s%s%s",
+                    !has_lid ? "there was one" : "",
+                    (!has_lid && u.uinwater) ? " and " : "",
+                    u.uinwater ? (Underwater ? "you weren't underwater"
+                                  : "you weren't in the water") : "");
+            /* past tense is applicable for death while Unchanging */
+            enl_msg(You_, "could cling", "could have clung", buf, "");
+        }
+    }
     /* actively walking on water handled earlier as a status condition */
     if (Wwalking && !walking_on_water())
         you_can("walk on water", from_what(WWALKING));
@@ -1801,7 +1813,7 @@ attributes_enlightenment(int unused_mode UNUSED, int final)
         you_have("extra luck", "");
     else if (u.moreluck < 0)
         you_have("reduced luck", "");
-    if (carrying(LUCKSTONE) || carrying(GOLDEN_EGG) || stone_luck(TRUE)) {
+    if (carrying(LUCKSTONE) || stone_luck(TRUE)) {
         ltmp = stone_luck(FALSE);
         if (ltmp <= 0)
             enl_msg("Bad luck ", "does", "did", " not time out for you", "");
@@ -2557,7 +2569,8 @@ set_vanq_order(void)
     winid tmpwin;
     menu_item *selected;
     anything any;
-    int i, n, choice;
+    int i, n, choice,
+        clr = 0;
 
     tmpwin = create_nhwindow(NHW_MENU);
     start_menu(tmpwin, MENU_BEHAVE_STANDARD);
@@ -2566,7 +2579,7 @@ set_vanq_order(void)
         if (i == VANQ_ALPHA_MIX || i == VANQ_MCLS_HTOL) /* skip these */
             continue;
         any.a_int = i + 1;
-        add_menu(tmpwin, &nul_glyphinfo, &any, 0, 0, ATR_NONE,
+        add_menu(tmpwin, &nul_glyphinfo, &any, 0, 0, ATR_NONE, clr,
                  vanqorders[i],
                  (i == g.vanq_sortmode)
                     ? MENU_ITEMFLAGS_SELECTED : MENU_ITEMFLAGS_NONE);
@@ -2671,7 +2684,7 @@ list_vanquished(char defquery, boolean ask)
 
         c = ask ? yn_function(
                             "Do you want an account of creatures vanquished?",
-                              ynaqchars, defquery)
+                             ynaqchars, defquery, TRUE)
                 : defquery;
         if (c == 'q')
             done_stopprint++;
@@ -2734,7 +2747,7 @@ list_vanquished(char defquery, boolean ask)
                                 makeplural(mons[i].pmnames[NEUTRAL]));
                 }
                 /* number of leading spaces to match 3 digit prefix */
-                pfx = !strncmpi(buf, "the ", 3) ? 0
+                pfx = !strncmpi(buf, "the ", 4) ? 0
                       : !strncmpi(buf, "an ", 3) ? 1
                         : !strncmpi(buf, "a ", 2) ? 2
                           : !digit(buf[2]) ? 4 : 0;
@@ -2820,7 +2833,7 @@ list_genocided(char defquery, boolean ask)
                 (nextinct && !ngenocided) ? "extinct " : "",
                 (ngenocided) ? " genocided" : "",
                 (nextinct && ngenocided) ? " and extinct" : "");
-        c = ask ? yn_function(buf, ynqchars, defquery) : defquery;
+        c = ask ? yn_function(buf, ynqchars, defquery, TRUE) : defquery;
         if (c == 'q')
             done_stopprint++;
         if (c == 'y') {
@@ -3010,13 +3023,26 @@ mstatusline(struct monst *mtmp)
                          : ", [? speed]");
     if (mtmp->minvis)
         Strcat(info, ", invisible");
-    if (mtmp == u.ustuck)
-        Strcat(info, sticks(g.youmonst.data) ? ", held by you"
-                      : !u.uswallow ? ", holding you"
-                         : attacktype_fordmg(u.ustuck->data, AT_ENGL, AD_DGST)
-                            ? ", digesting you"
-                            : is_animal(u.ustuck->data) ? ", swallowing you"
-                               : ", engulfing you");
+    if (mtmp == u.ustuck) {
+        struct permonst *pm = u.ustuck->data;
+
+        /* being swallowed/engulfed takes priority over sticks(youmonst);
+           this used to have that backwards and checked sticks() first */
+        Strcat(info, u.uswallow ? (digests(pm)
+                                   ? ", digesting you"
+                                   /* note: the "swallowing you" case won't
+                                      happen because all animal engulfers
+                                      either digest their victims (purple
+                                      worm) or enfold them (trappers and
+                                      lurkers above) */
+                                   : (is_animal(pm) && !enfolds(pm))
+                                     ? ", swallowing you"
+                                     : ", engulfing you")
+                     /* !u.uswallow; if both youmonst and ustuck are holders,
+                        youmonst wins */
+                     : (!sticks(g.youmonst.data) ? ", holding you"
+                                                 : ", held by you"));
+    }
     if (mtmp == u.usteed) {
         Strcat(info, ", carrying you");
         if (Wounded_legs) {

@@ -1,4 +1,4 @@
--- NetHack 3.7	tower.des	$NHDT-Date: 1432512784 2015/05/25 00:13:04 $  $NHDT-Branch: master $:$NHDT-Revision: 1.9 $
+-- NetHack tower tower1.lua	$NHDT-Date: 1652196037 2022/05/10 15:20:37 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.1 $
 --	Copyright (c) 1989 by Jean-Christophe Collet
 -- NetHack may be freely redistributed.  See license for details.
 --
@@ -26,7 +26,7 @@ shuffle(niches);
 
 des.ladder("down", 11,05)
 -- The lord and his court
-des.monster("Bunnicula", 06, 05)
+des.monster("Vlad the Impaler", 06, 05)
 des.monster("V",niches[1])
 des.monster("V",niches[2])
 des.monster("V",niches[3])
@@ -42,12 +42,7 @@ des.door("locked",08,07)
 des.door("locked",10,07)
 des.door("closed",03,06)
 -- treasures
--- des.object("chest", 07,05)
-des.object({ id = "chest", x=07, y=05,
-             contents = function()
-                des.object({ id = "golden egg", quantity=1 })
-             end
-});
+des.object("chest", 07,05)
 
 des.object("chest",niches[6])
 des.object("chest",niches[1])

@@ -1,4 +1,4 @@
--- NetHack 3.7	sokoban.des	$NHDT-Date: 1432512784 2015/05/25 00:13:04 $  $NHDT-Branch: master $:$NHDT-Revision: 1.13 $
+-- NetHack sokoban soko1-2.lua	$NHDT-Date: 1652196034 2022/05/10 15:20:34 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.6 $
 --	Copyright (c) 1998-1999 by Kevin Hugo
 -- NetHack may be freely redistributed.  See license for details.
 --
@@ -100,16 +100,11 @@ des.region({ region={18,09, 22,15}, lit = 1, type = "zoo", filled = 1, irregular
 
 local pt = selection.rndcoord(place);
 if percent(25) then
-   if percent(90) then
-       des.object({ id="bag of holding", coord=pt,
-            buc="not-cursed", achievement=1 });
-   else
-       des.object({ id="Faberge egg", coord=pt,
-            buc="not-cursed", achievement=1 });
-   end
+   des.object({ id="bag of holding", coord=pt,
+		buc="not-cursed", achievement=1 });
 else
    des.object({ id="amulet of reflection", coord=pt,
 		buc="not-cursed", achievement=1 });
 end
 des.engraving({ coord = pt, type = "burn", text = "Elbereth" });
-des.object({ id = "scare monster", coord = pt, buc = "cursed" });
+des.object({ id = "scroll of scare monster", coord = pt, buc = "cursed" });

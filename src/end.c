@@ -110,7 +110,7 @@ panictrace_handler(int sig_unused UNUSED)
     int f2;
 
 #ifdef CURSES_GRAPHICS
-    if (iflags.window_inited && WINDOWPORT("curses")) {
+    if (iflags.window_inited && WINDOWPORT(curses)) {
         extern void curses_uncurse_terminal(void); /* wincurs.h */
 
         /* it is risky calling this during a program-terminating signal,
@@ -762,7 +762,7 @@ dump_everything(
        it's conceivable that the game started with a different
        build date+time or even with an older nethack version,
        but we only have access to the one it finished under */
-    putstr(0, 0, getversionstring(pbuf));
+    putstr(0, 0, getversionstring(pbuf, sizeof pbuf));
     putstr(0, 0, "");
 
     /* game start and end date+time to disambiguate version date+time */
@@ -786,6 +786,7 @@ dump_everything(
     putstr(0, 0, pbuf);
     putstr(0, 0, "");
 
+    /* info about current game state */
     dump_map();
     putstr(0, 0, do_statusline1());
     putstr(0, 0, do_statusline2());
@@ -793,13 +794,15 @@ dump_everything(
 
     dump_plines();
     putstr(0, 0, "");
-    show_gamelog((how >= PANICKED) ? ENL_GAMEOVERALIVE : ENL_GAMEOVERDEAD);
-    putstr(0, 0, "");
     putstr(0, 0, "Inventory:");
     (void) display_inventory((char *) 0, TRUE);
     container_contents(g.invent, TRUE, TRUE, FALSE);
     enlightenment((BASICENLIGHTENMENT | MAGICENLIGHTENMENT),
                   (how >= PANICKED) ? ENL_GAMEOVERALIVE : ENL_GAMEOVERDEAD);
+    putstr(0, 0, "");
+
+    /* overview of the game up to this point */
+    show_gamelog((how >= PANICKED) ? ENL_GAMEOVERALIVE : ENL_GAMEOVERDEAD);
     putstr(0, 0, "");
     list_vanquished('d', FALSE); /* 'd' => 'y' */
     putstr(0, 0, "");
@@ -831,7 +834,7 @@ disclose(int how, boolean taken)
             Strcpy(qbuf, "Do you want your possessions identified?");
 
         ask = should_query_disclose_option('i', &defquery);
-        c = ask ? yn_function(qbuf, ynqchars, defquery) : defquery;
+        c = ask ? yn_function(qbuf, ynqchars, defquery, TRUE) : defquery;
         if (c == 'y') {
             /* caller has already ID'd everything */
             (void) display_inventory((char *) 0, FALSE);
@@ -844,7 +847,7 @@ disclose(int how, boolean taken)
     if (!done_stopprint) {
         ask = should_query_disclose_option('a', &defquery);
         c = ask ? yn_function("Do you want to see your attributes?", ynqchars,
-                              defquery)
+                              defquery, TRUE)
                 : defquery;
         if (c == 'y')
             enlightenment((BASICENLIGHTENMENT | MAGICENLIGHTENMENT),
@@ -876,7 +879,7 @@ disclose(int how, boolean taken)
                        to plural vs singular for conducts but the less
                        specific "conduct and achievements" is sufficient */
                     (acnt > 0) ? " and achievements" : "");
-            c = yn_function(qbuf, ynqchars, defquery);
+            c = yn_function(qbuf, ynqchars, defquery, TRUE);
         } else {
             c = defquery;
         }
@@ -889,7 +892,7 @@ disclose(int how, boolean taken)
     if (!done_stopprint) {
         ask = should_query_disclose_option('o', &defquery);
         c = ask ? yn_function("Do you want to see the dungeon overview?",
-                              ynqchars, defquery)
+                              ynqchars, defquery, TRUE)
                 : defquery;
         if (c == 'y')
             show_overview((how >= PANICKED) ? 1 : 2, how);
@@ -903,6 +906,7 @@ static void
 savelife(int how)
 {
     int uhpmin;
+    int givehp = 50 + 10 * (ACURR(A_CON) / 2);
 
     /* life-drain/level-loss to experience level 0 kills without actually
        reducing ulevel below 1, but include this for bulletproofing */
@@ -911,9 +915,9 @@ savelife(int how)
     uhpmin = minuhpmax(10);
     if (u.uhpmax < uhpmin)
         setuhpmax(uhpmin);
-    u.uhp = u.uhpmax;
+    u.uhp = min(u.uhpmax, givehp);
     if (Upolyd) /* Unchanging, or death which bypasses losing hit points */
-        u.mh = u.mhmax;
+        u.mh = min(u.mhmax, givehp);
     if (u.uhunger < 500 || how == CHOKING) {
         init_uhunger();
     }
@@ -924,10 +928,15 @@ savelife(int how)
     }
     g.nomovemsg = "You survived that attempt on your life.";
     g.context.move = 0;
-    if (g.multi > 0)
-        g.multi = 0;
-    else
-        g.multi = -1;
+
+    g.multi = -1; /* can't move again during the current turn */
+    /* in case being life-saved is immediately followed by being killed
+       again (perhaps due to zap rebound); this text will be appended to
+          "killed by <something>, while "
+       in high scores entry, if any, and in logfile (but not on tombstone) */
+    g.multi_reason = Role_if(PM_TOURIST) ? "being toyed with by Fate"
+                                         : "attempting to cheat Death";
+
     if (u.utrap && u.utraptype == TT_LAVA)
         reset_utrap(FALSE);
     g.context.botl = TRUE;
@@ -1866,7 +1875,7 @@ save_killers(NHFILE *nhfp)
     if (perform_bwrite(nhfp)) {
         for (kptr = &g.killer; kptr != (struct kinfo *) 0; kptr = kptr->next) {
             if (nhfp->structlevel)
-	        bwrite(nhfp->fd, (genericptr_t)kptr, sizeof(struct kinfo));
+                bwrite(nhfp->fd, (genericptr_t)kptr, sizeof(struct kinfo));
         }
     }
     if (release_data(nhfp)) {
@@ -1885,7 +1894,7 @@ restore_killers(NHFILE *nhfp)
 
     for (kptr = &g.killer; kptr != (struct kinfo *) 0; kptr = kptr->next) {
         if (nhfp->structlevel)
-	    mread(nhfp->fd, (genericptr_t)kptr, sizeof(struct kinfo));
+            mread(nhfp->fd, (genericptr_t)kptr, sizeof(struct kinfo));
         if (kptr->next) {
             kptr->next = (struct kinfo *) alloc(sizeof (struct kinfo));
         }

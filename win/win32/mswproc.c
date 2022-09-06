@@ -79,7 +79,7 @@ strbuf_t raw_print_strbuf = { 0 };
 
 /* Interface definition, for windows.c */
 struct window_procs mswin_procs = {
-    "MSWIN",
+    WPID(mswin),
     WC_COLOR | WC_HILITE_PET | WC_ALIGN_MESSAGE | WC_ALIGN_STATUS | WC_INVERSE
         | WC_SCROLL_AMOUNT | WC_SCROLL_MARGIN | WC_MAP_MODE | WC_FONT_MESSAGE
         | WC_FONT_STATUS | WC_FONT_MENU | WC_FONT_TEXT | WC_FONT_MAP
@@ -100,7 +100,7 @@ struct window_procs mswin_procs = {
     genl_putmixed, mswin_display_file, mswin_start_menu, mswin_add_menu,
     mswin_end_menu, mswin_select_menu,
     genl_message_menu, /* no need for X-specific handling */
-    mswin_update_inventory, mswin_mark_synch, mswin_wait_synch,
+    mswin_mark_synch, mswin_wait_synch,
 #ifdef CLIPPING
     mswin_cliparound,
 #endif
@@ -119,6 +119,8 @@ struct window_procs mswin_procs = {
     mswin_status_init, mswin_status_finish, mswin_status_enablefield,
     mswin_status_update,
     genl_can_suspend_yes,
+    mswin_update_inventory,
+    mswin_ctrl_nhwindow,
 };
 
 /*
@@ -332,6 +334,7 @@ prompt_for_player_selection(void)
     anything any;
     menu_item *selected = 0;
     DWORD box_result;
+    int clr = 0;
 
     logDebug("prompt_for_player_selection()\n");
 
@@ -429,8 +432,8 @@ prompt_for_player_selection(void)
                         } else
                             Strcpy(rolenamebuf, roles[i].name.m);
                     }
-                    add_menu(win, &nul_glyphinfo, &any, thisch, 0,
-                             ATR_NONE, an(rolenamebuf), MENU_ITEMFLAGS_NONE);
+                    add_menu(win, &nul_glyphinfo, &any, thisch, 0, ATR_NONE,
+                             clr, an(rolenamebuf), MENU_ITEMFLAGS_NONE);
                     lastch = thisch;
                 }
             }
@@ -439,10 +442,10 @@ prompt_for_player_selection(void)
             if (any.a_int == 0) /* must be non-zero */
                 any.a_int = randrole(FALSE) + 1;
             add_menu(win, &nul_glyphinfo, &any, '*', 0,
-                     ATR_NONE, "Random", MENU_ITEMFLAGS_NONE);
+                     ATR_NONE, clr, "Random", MENU_ITEMFLAGS_NONE);
             any.a_int = i + 1; /* must be non-zero */
             add_menu(win, &nul_glyphinfo, &any, 'q', 0,
-                     ATR_NONE, "Quit", MENU_ITEMFLAGS_NONE);
+                     ATR_NONE, clr, "Quit", MENU_ITEMFLAGS_NONE);
             Sprintf(pbuf, "Pick a role for your %s", plbuf);
             end_menu(win, pbuf);
             n = select_menu(win, PICK_ONE, &selected);
@@ -505,7 +508,7 @@ prompt_for_player_selection(void)
                                 flags.initalign)) {
                         any.a_int = i + 1; /* must be non-zero */
                         add_menu(win, &nul_glyphinfo, &any,
-                                 races[i].noun[0], 0, ATR_NONE,
+                                 races[i].noun[0], 0, ATR_NONE, clr,
                                  races[i].noun, MENU_ITEMFLAGS_NONE);
                     }
                 any.a_int = pick_race(flags.initrole, flags.initgend,
@@ -513,10 +516,10 @@ prompt_for_player_selection(void)
                 if (any.a_int == 0) /* must be non-zero */
                     any.a_int = randrace(flags.initrole) + 1;
                 add_menu(win, &nul_glyphinfo, &any, '*', 0,
-                         ATR_NONE, "Random", MENU_ITEMFLAGS_NONE);
+                         ATR_NONE, clr, "Random", MENU_ITEMFLAGS_NONE);
                 any.a_int = i + 1; /* must be non-zero */
                 add_menu(win, &nul_glyphinfo, &any, 'q', 0,
-                         ATR_NONE, "Quit", MENU_ITEMFLAGS_NONE);
+                         ATR_NONE, clr, "Quit", MENU_ITEMFLAGS_NONE);
                 Sprintf(pbuf, "Pick the race of your %s", plbuf);
                 end_menu(win, pbuf);
                 n = select_menu(win, PICK_ONE, &selected);
@@ -580,7 +583,7 @@ prompt_for_player_selection(void)
                                 flags.initalign)) {
                         any.a_int = i + 1;
                         add_menu(win, &nul_glyphinfo, &any,
-                                 genders[i].adj[0], 0, ATR_NONE,
+                                 genders[i].adj[0], 0, ATR_NONE, clr,
                                  genders[i].adj, MENU_ITEMFLAGS_NONE);
                     }
                 any.a_int = pick_gend(flags.initrole, flags.initrace,
@@ -588,10 +591,10 @@ prompt_for_player_selection(void)
                 if (any.a_int == 0) /* must be non-zero */
                     any.a_int = randgend(flags.initrole, flags.initrace) + 1;
                 add_menu(win, &nul_glyphinfo, &any, '*', 0,
-                         ATR_NONE, "Random", MENU_ITEMFLAGS_NONE);
+                         ATR_NONE, clr, "Random", MENU_ITEMFLAGS_NONE);
                 any.a_int = i + 1; /* must be non-zero */
                 add_menu(win, &nul_glyphinfo, &any, 'q', 0,
-                         ATR_NONE, "Quit", MENU_ITEMFLAGS_NONE);
+                         ATR_NONE, clr, "Quit", MENU_ITEMFLAGS_NONE);
                 Sprintf(pbuf, "Pick the gender of your %s", plbuf);
                 end_menu(win, pbuf);
                 n = select_menu(win, PICK_ONE, &selected);
@@ -654,7 +657,7 @@ prompt_for_player_selection(void)
                                  flags.initgend, i)) {
                         any.a_int = i + 1;
                         add_menu(win, &nul_glyphinfo, &any,
-                                 aligns[i].adj[0], 0, ATR_NONE,
+                                 aligns[i].adj[0], 0, ATR_NONE, clr,
                                  aligns[i].adj, MENU_ITEMFLAGS_NONE);
                     }
                 any.a_int = pick_align(flags.initrole, flags.initrace,
@@ -662,10 +665,10 @@ prompt_for_player_selection(void)
                 if (any.a_int == 0) /* must be non-zero */
                     any.a_int = randalign(flags.initrole, flags.initrace) + 1;
                 add_menu(win, &nul_glyphinfo, &any, '*', 0,
-                         ATR_NONE, "Random", MENU_ITEMFLAGS_NONE);
+                         ATR_NONE, clr, "Random", MENU_ITEMFLAGS_NONE);
                 any.a_int = i + 1; /* must be non-zero */
                 add_menu(win, &nul_glyphinfo, &any, 'q', 0,
-                         ATR_NONE, "Quit", MENU_ITEMFLAGS_NONE);
+                         ATR_NONE, clr, "Quit", MENU_ITEMFLAGS_NONE);
                 Sprintf(pbuf, "Pick the alignment of your %s", plbuf);
                 end_menu(win, pbuf);
                 n = select_menu(win, PICK_ONE, &selected);
@@ -1100,7 +1103,8 @@ mswin_start_menu(winid wid, unsigned long mbehavior)
 add_menu(windid window, const glyph_info *glyphinfo,
                                 const anything identifier,
                                 char accelerator, char groupacc,
-                                int attr, char *str, unsigned int itemflags)
+                                int attr, int clr,
+                                char *str, unsigned int itemflags)
                 -- Add a text line str to the given menu window.  If
                    identifier is 0, then the line cannot be selected (e.g. a title).
                    Otherwise, identifier is the value returned if the line is
@@ -1131,13 +1135,13 @@ add_menu(windid window, const glyph_info *glyphinfo,
 void
 mswin_add_menu(winid wid, const glyph_info *glyphinfo,
                const ANY_P *identifier,
-               char accelerator, char group_accel, int attr,
+               char accelerator, char group_accel, int attr, int clr,
                const char *str, unsigned int itemflags)
 {
     boolean presel = ((itemflags & MENU_ITEMFLAGS_SELECTED) != 0);
-    logDebug("mswin_add_menu(%d, %d, %u, %p, %c, %c, %d, %s, %u)\n", wid,
+    logDebug("mswin_add_menu(%d, %d, %u, %p, %c, %c, %d, %d, %s, %u)\n", wid,
              glyphinfo->glyph, glyphinfo->gm.glyphflags,
-             identifier, (char) accelerator, (char) group_accel, attr, str,
+             identifier, (char) accelerator, (char) group_accel, attr, clr, str,
              itemflags);
     if ((wid >= 0) && (wid < MAXWINDOWS)
         && (GetNHApp()->windowlist[wid].win != NULL)) {
@@ -1241,6 +1245,15 @@ mswin_update_inventory(int arg)
         display_inventory(NULL, FALSE);
 }
 
+win_request_info *
+mswin_ctrl_nhwindow(
+    winid window,
+    int request,
+    win_request_info *wri)
+{
+    return (win_request_info *) 0;
+}
+
 /*
 mark_synch()    -- Don't go beyond this point in I/O on any channel until
                    all channels are caught up to here.  Can be an empty call
@@ -1293,14 +1306,14 @@ print_glyph(window, x, y, glyphinfo, bkglyphinfo)
                    window.  Glyphs are integers mapped to whatever the window-
                    port wants (symbol, font, color, attributes, ...there's
                    a 1-1 map between glyphs and distinct things on the map).
-		-- bkglyphinfo contains a background glyph for potential use
+                -- bkglyphinfo contains a background glyph for potential use
                    by some graphical or tiled environments to allow the depiction
-		   to fall against a background consistent with the grid 
-		   around x,y.
+                   to fall against a background consistent with the grid 
+                   around x,y.
                    
 */
 void
-mswin_print_glyph(winid wid, xchar x, xchar y,
+mswin_print_glyph(winid wid, coordxy x, coordxy y,
                   const glyph_info *glyphinfo, const glyph_info *bkglyphinfo)
 {
     logDebug("mswin_print_glyph(%d, %d, %d, %d, %d, %lu)\n",
@@ -1425,7 +1438,7 @@ mswin_nhgetch(void)
 }
 
 /*
-int nh_poskey(int *x, int *y, int *mod)
+int nh_poskey(coordxy *x, coordxy *y, int *mod)
                 -- Returns a single character input from the user or a
                    a positioning event (perhaps from a mouse).  If the
                    return value is non-zero, a character was typed, else,
@@ -1440,7 +1453,7 @@ int nh_poskey(int *x, int *y, int *mod)
                    routine always returns a non-zero character.
 */
 int
-mswin_nh_poskey(int *x, int *y, int *mod)
+mswin_nh_poskey(coordxy *x, coordxy *y, int *mod)
 {
     PMSNHEvent event;
     int key;
@@ -1451,10 +1464,10 @@ mswin_nh_poskey(int *x, int *y, int *mod)
         mswin_main_loop();
 
     if (event->type == NHEVENT_MOUSE) {
-	if (iflags.wc_mouse_support) {
+        if (iflags.wc_mouse_support) {
             *mod = event->ei.ms.mod;
-            *x = event->ei.ms.x;
-            *y = event->ei.ms.y;
+            *x = (coordxy) event->ei.ms.x;
+            *y = (coordxy) event->ei.ms.y;
         }
         key = 0;
     } else {
@@ -1750,12 +1763,12 @@ int get_ext_cmd(void)
 int
 mswin_get_ext_cmd(void)
 {
+    char cmd[BUFSZ];
     int ret;
     logDebug("mswin_get_ext_cmd()\n");
 
     if (!iflags.wc_popup_dialog) {
         char c;
-        char cmd[BUFSZ];
         int i, len;
         int createcaret;
 
@@ -1784,7 +1797,8 @@ mswin_get_ext_cmd(void)
                         break;
 
                 if (extcmdlist[i].ef_txt == (char *) 0) {
-                    pline("%s: unknown extended command.", cmd);
+                    pline("%s%s: unknown extended command.",
+                          visctrl(extcmd_initiator()), cmd);
                     i = -1;
                 }
                 break;
@@ -1825,13 +1839,16 @@ mswin_get_ext_cmd(void)
         createcaret = 0;
         SendMessage(mswin_hwnd_from_winid(WIN_MESSAGE), WM_MSNH_COMMAND,
                     (WPARAM) MSNH_MSG_CARET, (LPARAM) &createcaret);
-        return i;
+        ret = i;
     } else {
-        if (mswin_ext_cmd_window(&ret) == IDCANCEL)
-            return -1;
+        cmd[0] = '\0';
+        if (mswin_ext_cmd_window(&ret) != IDCANCEL)
+            Strcpy(cmd, extcmdlist[ret].ef_txt);
         else
-            return ret;
+            ret = -1;
     }
+
+    return ret;
 }
 
 /*
@@ -2386,22 +2403,22 @@ mswin_read_reg(void)
     char keystring[MAX_PATH];
     int i;
     COLORREF default_mapcolors[CLR_MAX] = {
-	RGB(0x55, 0x55, 0x55), /* CLR_BLACK */
-	RGB(0xFF, 0x00, 0x00), /* CLR_RED */
-	RGB(0x00, 0x80, 0x00), /* CLR_GREEN */
-	RGB(0xA5, 0x2A, 0x2A), /* CLR_BROWN */
-	RGB(0x00, 0x00, 0xFF), /* CLR_BLUE */
-	RGB(0xFF, 0x00, 0xFF), /* CLR_MAGENTA */
-	RGB(0x00, 0xFF, 0xFF), /* CLR_CYAN */
-	RGB(0xC0, 0xC0, 0xC0), /* CLR_GRAY */
-	RGB(0xFF, 0xFF, 0xFF), /* NO_COLOR */
-	RGB(0xFF, 0xA5, 0x00), /* CLR_ORANGE */
-	RGB(0x00, 0xFF, 0x00), /* CLR_BRIGHT_GREEN */
-	RGB(0xFF, 0xFF, 0x00), /* CLR_YELLOW */
-	RGB(0x00, 0xC0, 0xFF), /* CLR_BRIGHT_BLUE */
-	RGB(0xFF, 0x80, 0xFF), /* CLR_BRIGHT_MAGENTA */
-	RGB(0x80, 0xFF, 0xFF), /* CLR_BRIGHT_CYAN */
-	RGB(0xFF, 0xFF, 0xFF)  /* CLR_WHITE */
+        RGB(0x55, 0x55, 0x55), /* CLR_BLACK */
+        RGB(0xFF, 0x00, 0x00), /* CLR_RED */
+        RGB(0x00, 0x80, 0x00), /* CLR_GREEN */
+        RGB(0xA5, 0x2A, 0x2A), /* CLR_BROWN */
+        RGB(0x00, 0x00, 0xFF), /* CLR_BLUE */
+        RGB(0xFF, 0x00, 0xFF), /* CLR_MAGENTA */
+        RGB(0x00, 0xFF, 0xFF), /* CLR_CYAN */
+        RGB(0xC0, 0xC0, 0xC0), /* CLR_GRAY */
+        RGB(0xFF, 0xFF, 0xFF), /* NO_COLOR */
+        RGB(0xFF, 0xA5, 0x00), /* CLR_ORANGE */
+        RGB(0x00, 0xFF, 0x00), /* CLR_BRIGHT_GREEN */
+        RGB(0xFF, 0xFF, 0x00), /* CLR_YELLOW */
+        RGB(0x00, 0xC0, 0xFF), /* CLR_BRIGHT_BLUE */
+        RGB(0xFF, 0x80, 0xFF), /* CLR_BRIGHT_MAGENTA */
+        RGB(0x80, 0xFF, 0xFF), /* CLR_BRIGHT_CYAN */
+        RGB(0xFF, 0xFF, 0xFF)  /* CLR_WHITE */
     };
 
     sprintf(keystring, "%s\\%s\\%s\\%s", CATEGORYKEY, COMPANYKEY, PRODUCTKEY,
@@ -3040,14 +3057,14 @@ status_update(int fldindex, genericptr_t ptr, int chg, int percent, int color, u
                    BL_ALIGN, BL_SCORE, BL_CAP, BL_GOLD, BL_ENE, BL_ENEMAX,
                    BL_XP, BL_AC, BL_HD, BL_TIME, BL_HUNGER, BL_HP, BL_HPMAX,
                    BL_LEVELDESC, BL_EXP, BL_CONDITION
-		-- fldindex could also be BL_FLUSH, which is not really
-		   a field index, but is a special trigger to tell the 
-		   windowport that it should output all changes received
+                -- fldindex could also be BL_FLUSH, which is not really
+                   a field index, but is a special trigger to tell the 
+                   windowport that it should output all changes received
                    to this point. It marks the end of a bot() cycle.
-		-- fldindex could also be BL_RESET, which is not really
-		   a field index, but is a special advisory to to tell the 
-		   windowport that it should redisplay all its status fields,
-		   even if no changes have been presented to it.
+                -- fldindex could also be BL_RESET, which is not really
+                   a field index, but is a special advisory to to tell the 
+                   windowport that it should redisplay all its status fields,
+                   even if no changes have been presented to it.
                 -- ptr is usually a "char *", unless fldindex is BL_CONDITION.
                    If fldindex is BL_CONDITION, then ptr is a long value with
                    any or none of the following bits set (from botl.h):

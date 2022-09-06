@@ -31,13 +31,14 @@ void remove_region(NhRegion *);
 #if 0
 void replace_mon_regions(struct monst *,struct monst *);
 void remove_mon_from_regions(struct monst *);
-NhRegion *create_msg_region(xchar,xchar,xchar,xchar, const char *,
+NhRegion *create_msg_region(coordxy,coordxy,coordxy,coordxy, const char *,
                            const char *);
 boolean enter_force_field(genericptr,genericptr);
-NhRegion *create_force_field(xchar,xchar,int,long);
+NhRegion *create_force_field(coordxy,coordxy,int,long);
 #endif
 
 static void reset_region_mids(NhRegion *);
+static boolean is_hero_inside_gas_cloud(void);
 
 static const callback_proc callbacks[] = {
 #define INSIDE_GAS_CLOUD 0
@@ -426,7 +427,7 @@ run_regions(void)
  * check whether player enters/leaves one or more regions.
  */
 boolean
-in_out_region(xchar x, xchar y)
+in_out_region(coordxy x, coordxy y)
 {
     int i, f_indx = 0;
 
@@ -479,7 +480,7 @@ in_out_region(xchar x, xchar y)
  * check whether a monster enters/leaves one or more regions.
  */
 boolean
-m_in_out_region(struct monst *mon, xchar x, xchar y)
+m_in_out_region(struct monst *mon, coordxy x, coordxy y)
 {
     int i, f_indx = 0;
 
@@ -600,7 +601,7 @@ remove_mon_from_regions(struct monst *mon)
  * Returns NULL if not, otherwise returns region.
  */
 NhRegion *
-visible_region_at(xchar x, xchar y)
+visible_region_at(coordxy x, coordxy y)
 {
     register int i;
 
@@ -614,7 +615,7 @@ visible_region_at(xchar x, xchar y)
 }
 
 void
-show_region(NhRegion *reg, xchar x, xchar y)
+show_region(NhRegion *reg, coordxy x, coordxy y)
 {
     show_glyph(x, y, reg->glyph);
 }
@@ -871,7 +872,7 @@ reset_region_mids(NhRegion *reg)
 
 NhRegion *
 create_msg_region(
-    xchar x, xchar y, xchar w, xchar h,
+    coordxy x, coordxy y, coordxy w, coordxy h,
     const char *msg_enter, const char *msg_leave)
 {
     NhRect tmprect;
@@ -918,7 +919,7 @@ enter_force_field(genericptr_t p1, genericptr_t p2)
 }
 
 NhRegion *
-create_force_field(xchar x, xchar y, int radius, long ttl)
+create_force_field(coordxy x, coordxy y, int radius, long ttl)
 {
     int i;
     NhRegion *ff;
@@ -965,7 +966,7 @@ expire_gas_cloud(genericptr_t p1, genericptr_t p2 UNUSED)
 {
     NhRegion *reg;
     int damage;
-    xchar x, y;
+    coordxy x, y;
 
     reg = (NhRegion *) p1;
     damage = reg->arg.a_int;
@@ -1062,25 +1063,37 @@ inside_gas_cloud(genericptr_t p1, genericptr_t p2)
     return FALSE; /* Monster is still alive */
 }
 
+static boolean
+is_hero_inside_gas_cloud(void)
+{
+    int i;
+
+    for (i = 0; i < g.n_regions; i++)
+        if (hero_inside(g.regions[i]) && g.regions[i]->inside_f == INSIDE_GAS_CLOUD)
+            return TRUE;
+    return FALSE;
+}
+
 /* Create a gas cloud which starts at (x,y) and grows outward from it via
  * breadth-first search.
  * cloudsize is the number of squares the cloud will attempt to fill.
  * damage is how much it deals to afflicted creatures. */
 #define MAX_CLOUD_SIZE 150
 NhRegion *
-create_gas_cloud(xchar x, xchar y, int cloudsize, int damage)
+create_gas_cloud(coordxy x, coordxy y, int cloudsize, int damage)
 {
     NhRegion *cloud;
     int i, j;
     NhRect tmprect;
 
     /* store visited coords */
-    xchar xcoords[MAX_CLOUD_SIZE];
-    xchar ycoords[MAX_CLOUD_SIZE];
+    coordxy xcoords[MAX_CLOUD_SIZE];
+    coordxy ycoords[MAX_CLOUD_SIZE];
     xcoords[0] = x;
     ycoords[0] = y;
     int curridx;
     int newidx = 1; /* initial spot is already taken */
+    boolean inside_cloud = is_hero_inside_gas_cloud();
 
     if (cloudsize > MAX_CLOUD_SIZE) {
         impossible("create_gas_cloud: cloud too large (%d)!", cloudsize);
@@ -1099,7 +1112,7 @@ create_gas_cloud(xchar x, xchar y, int cloudsize, int damage)
          * directions chosen. */
         coord dirs[4] = { {0, -1}, {0, 1}, {-1, 0}, {1, 0} };
         for (i = 4; i > 0; --i) {
-            xchar swapidx = rn2(i);
+            coordxy swapidx = rn2(i);
             coord tmp = dirs[swapidx];
             dirs[swapidx] = dirs[i-1];
             dirs[i-1] = tmp;
@@ -1160,6 +1173,11 @@ create_gas_cloud(xchar x, xchar y, int cloudsize, int damage)
     cloud->visible = TRUE;
     cloud->glyph = cmap_to_glyph(damage ? S_poisoncloud : S_cloud);
     add_region(cloud);
+
+    if (!g.in_mklev && !inside_cloud && is_hero_inside_gas_cloud())
+        You("are enveloped in a cloud of %s!",
+            damage ? "noxious gas" : "steam");
+
     return cloud;
 }
 

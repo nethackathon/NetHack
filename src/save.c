@@ -1,4 +1,4 @@
-/* NetHack 3.7	save.c	$NHDT-Date: 1644524061 2022/02/10 20:14:21 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.181 $ */
+/* NetHack 3.7	save.c	$NHDT-Date: 1661240721 2022/08/23 07:45:21 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.195 $ */
 /* Copyright (c) Stichting Mathematisch Centrum, Amsterdam, 1985. */
 /*-Copyright (c) Michael Allison, 2009. */
 /* NetHack may be freely redistributed.  See license for details. */
@@ -19,7 +19,9 @@ int dotcnt, dotrow; /* also used in restore */
 static void savelevchn(NHFILE *);
 static void savelevl(NHFILE *,boolean);
 static void savedamage(NHFILE *);
+static void save_bubbles(NHFILE *, xint8);
 static void save_stairs(NHFILE *);
+static void save_bc(NHFILE *);
 static void saveobj(NHFILE *,struct obj *);
 static void saveobjchn(NHFILE *,struct obj **);
 static void savemon(NHFILE *,struct monst *);
@@ -27,6 +29,7 @@ static void savemonchn(NHFILE *,struct monst *);
 static void savetrapchn(NHFILE *,struct trap *);
 static void save_gamelog(NHFILE *);
 static void savegamestate(NHFILE *);
+static void savelev_core(NHFILE *, xint8);
 static void save_msghistory(NHFILE *);
 
 #ifdef ZEROCOMP
@@ -65,7 +68,7 @@ dosave(void)
             exit_nhwindows("Be seeing you...");
             nh_terminate(EXIT_SUCCESS);
         } else
-            (void) doredraw();
+            docrt();
     }
     return ECMD_OK;
 }
@@ -75,8 +78,7 @@ int
 dosave0(void)
 {
     const char *fq_save;
-    xchar ltmp;
-    d_level uz_save;
+    xint8 ltmp;
     char whynot[BUFSZ];
     NHFILE *nhfp, *onhfp;
     int res = 0;
@@ -147,7 +149,7 @@ dosave0(void)
     dotcnt = 0;
     dotrow = 2;
     curs(WIN_MAP, 1, 1);
-    if (!WINDOWPORT("X11"))
+    if (!WINDOWPORT(X11))
         putstr(WIN_MAP, 0, "Saving:");
 #endif
     nhfp->mode = WRITING | FREEING;
@@ -174,17 +176,18 @@ dosave0(void)
      * parts of the restore code from completely initializing all
      * in-core data structures, since all we're doing is copying.
      * This also avoids at least one nasty core dump.
+     * [g.uz_save is used by save_bubbles() as well as to restore u.uz]
      */
-    uz_save = u.uz;
+    g.uz_save = u.uz;
     u.uz.dnum = u.uz.dlevel = 0;
     /* these pointers are no longer valid, and at least u.usteed
      * may mislead place_monster() on other levels
      */
-    set_ustuck((struct monst *) 0);
+    set_ustuck((struct monst *) 0); /* also clears u.uswallow */
     u.usteed = (struct monst *) 0;
 
-    for (ltmp = (xchar) 1; ltmp <= maxledgerno(); ltmp++) {
-        if (ltmp == ledger_no(&uz_save))
+    for (ltmp = (xint8) 1; ltmp <= maxledgerno(); ltmp++) {
+        if (ltmp == ledger_no(&g.uz_save))
             continue;
         if (!(g.level_info[ltmp].flags & LFILE_EXISTS))
             continue;
@@ -194,7 +197,7 @@ dosave0(void)
             dotrow++;
             dotcnt = 0;
         }
-        if (!WINDOWPORT("X11")) {
+        if (!WINDOWPORT(X11)) {
             putstr(WIN_MAP, 0, ".");
         }
         mark_synch();
@@ -218,7 +221,8 @@ dosave0(void)
     }
     close_nhfile(nhfp);
 
-    u.uz = uz_save;
+    u.uz = g.uz_save;
+    g.uz_save.dnum = g.uz_save.dlevel = 0;
 
     /* get rid of current level --jgm */
     delete_levelfile(ledger_no(&u.uz));
@@ -270,7 +274,6 @@ static void
 savegamestate(NHFILE* nhfp)
 {
     unsigned long uid;
-    struct obj *bc_objs = (struct obj *)0;
 
     g.program_state.saving++; /* caller should/did already set this... */
     uid = (unsigned long) getuid();
@@ -301,22 +304,8 @@ savegamestate(NHFILE* nhfp)
        pointers into invent (uwep, uarmg, uamul, &c) are set to Null too */
     saveobjchn(nhfp, &g.invent);
 
-    /* save ball and chain if they are currently dangling free (i.e. not
-       on floor or in inventory); 'looseball' and 'loosechain' have been
-       set up in caller because ball and chain will be gone by now if on
-       floor, or ball gone if carried; caveat: uball and uchain pointers
-       will be non-Null but stale (point to freed memory) in those cases */
-    bc_objs = (struct obj *) 0;
-    if (g.loosechain) {
-        g.loosechain->nobj = bc_objs; /* uchain */
-        bc_objs = g.loosechain;
-    }
-    if (g.looseball) {
-        g.looseball->nobj = bc_objs;
-        bc_objs = g.looseball;
-    }
-    saveobjchn(nhfp, &bc_objs); /* frees objs in list, sets bc_objs to Null */
-    g.looseball = g.loosechain = (struct obj *) 0;
+    /* save ball and chain if they happen to be in an unusal state */
+    save_bc(nhfp);
 
     saveobjchn(nhfp, &g.migrating_objs); /* frees objs and sets to Null */
     savemonchn(nhfp, g.migrating_mons);
@@ -329,7 +318,8 @@ savegamestate(NHFILE* nhfp)
     savelevchn(nhfp);
     if (nhfp->structlevel) {
         bwrite(nhfp->fd, (genericptr_t) &g.moves, sizeof g.moves);
-        bwrite(nhfp->fd, (genericptr_t) &g.quest_status, sizeof g.quest_status);
+        bwrite(nhfp->fd, (genericptr_t) &g.quest_status,
+               sizeof g.quest_status);
         bwrite(nhfp->fd, (genericptr_t) g.spl_book,
                sizeof (struct spell) * (MAXSPELL + 1));
     }
@@ -349,7 +339,6 @@ savegamestate(NHFILE* nhfp)
     }
     savefruitchn(nhfp);
     savenames(nhfp);
-    save_waterlevel(nhfp);
     save_msghistory(nhfp);
     save_gamelog(nhfp);
     if (nhfp->structlevel)
@@ -443,6 +432,8 @@ savestateinlock(void)
 
             g.ustuck_id = (u.ustuck ? u.ustuck->m_id : 0);
             g.usteed_id = (u.usteed ? u.usteed->m_id : 0);
+            /* if ball and/or chain aren't on floor or in invent, keep a copy
+               of their pointers; not valid when on floor or in invent */
             g.looseball = BALL_IN_MON ? uball : 0;
             g.loosechain = CHAIN_IN_MON ? uchain : 0;
             savegamestate(nhfp);
@@ -456,7 +447,30 @@ savestateinlock(void)
 #endif
 
 void
-savelev(NHFILE *nhfp, xchar lev)
+savelev(NHFILE *nhfp, xint8 lev)
+{
+    boolean set_uz_save = (g.uz_save.dnum == 0 && g.uz_save.dlevel == 0);
+
+    /* caller might have already set up g.uz_save and zeroed u.uz;
+       if not, we need to set it for save_bubbles(); caveat: if the
+       player quits during character selection, u.uz won't be set yet
+       but we'll be called during run-down */
+    if (set_uz_save && perform_bwrite(nhfp)) {
+        if (u.uz.dnum == 0 && u.uz.dlevel == 0) {
+            g.program_state.something_worth_saving = 0;
+            panic("savelev: where are we?");
+        }
+        g.uz_save = u.uz;
+    }
+
+    savelev_core(nhfp, lev);
+
+    if (set_uz_save)
+        g.uz_save.dnum = g.uz_save.dlevel = 0; /* unset */
+}
+
+static void
+savelev_core(NHFILE *nhfp, xint8 lev)
 {
 #ifdef TOS
     short tlev;
@@ -544,6 +558,8 @@ savelev(NHFILE *nhfp, xchar lev)
     save_engravings(nhfp);
     savedamage(nhfp); /* pending shop wall and/or floor repair */
     save_regions(nhfp);
+    save_bubbles(nhfp, lev); /* for water and air */
+
     if (nhfp->mode != FREEING) {
         if (nhfp->structlevel)
             bflush(nhfp->fd);
@@ -618,6 +634,28 @@ savelevl(NHFILE* nhfp, boolean rlecomp)
     return;
 }
 
+/* save Plane of Water's air bubbles and Plane of Air's clouds */
+static void
+save_bubbles(NHFILE *nhfp, xint8 lev)
+{
+    xint8 bbubbly;
+
+    /* air bubbles and clouds used to be saved as part of game state
+       because restoring them needs dungeon data that isn't available
+       during the first pass of their levels; now that they are part of
+       the current level instead, we write a zero or non-zero marker
+       so that restore can determine whether they are present even when
+       u.uz and ledger_no() aren't available to it yet */
+    bbubbly = 0;
+    if (lev == ledger_no(&water_level) || lev == ledger_no(&air_level))
+        bbubbly = lev; /* non-zero */
+    if (nhfp->structlevel)
+        bwrite(nhfp->fd, (genericptr_t) &bbubbly, sizeof bbubbly);
+
+    if (bbubbly)
+        save_waterlevel(nhfp); /* save air bubbles or clouds */
+}
+
 /* used when saving a level and also when saving dungeon overview data */
 void
 savecemetery(NHFILE* nhfp, struct cemetery** cemeteryaddr)
@@ -679,7 +717,9 @@ save_stairs(NHFILE* nhfp)
 
     while (stway) {
         if (perform_bwrite(nhfp)) {
-            if (stway->tolev.dnum == u.uz.dnum) {
+            boolean use_relative = (g.program_state.restoring != REST_GSTATE
+                                    && stway->tolev.dnum == u.uz.dnum);
+            if (use_relative) {
                 /* make dlevel relative to current level */
                 stway->tolev.dlevel -= u.uz.dlevel;
             }
@@ -687,7 +727,7 @@ save_stairs(NHFILE* nhfp)
                 bwrite(nhfp->fd, (genericptr_t) &buflen, sizeof buflen);
                 bwrite(nhfp->fd, (genericptr_t) stway, sizeof *stway);
             }
-            if (stway->tolev.dnum == u.uz.dnum) {
+            if (use_relative) {
                 /* reset staiway dlevel back to absolute */
                 stway->tolev.dlevel += u.uz.dlevel;
             }
@@ -702,10 +742,40 @@ save_stairs(NHFILE* nhfp)
     }
 }
 
+/* if ball and/or chain are loose, make an object chain for it/them and
+   save that separately from other objects */
+static void
+save_bc(NHFILE *nhfp)
+{
+    struct obj *bc_objs = 0;
+
+    /* save ball and chain if they are currently dangling free (i.e. not
+       on floor or in inventory); 'looseball' and 'loosechain' have been
+       set up in caller because ball and chain will be gone by now if on
+       floor, or ball gone if carried */
+    if (g.loosechain) {
+        g.loosechain->nobj = bc_objs; /* uchain */
+        bc_objs = g.loosechain;
+        if (nhfp->mode & FREEING) {
+            setworn((struct obj *) 0, W_CHAIN); /* sets 'uchain' to Null */
+            g.loosechain = (struct obj *) 0;
+        }
+    }
+    if (g.looseball) {
+        g.looseball->nobj = bc_objs;
+        bc_objs = g.looseball;
+        if (nhfp->mode & FREEING) {
+            setworn((struct obj *) 0, W_BALL); /* sets 'uball' to Null */
+            g.looseball = (struct obj *) 0;
+        }
+    }
+    saveobjchn(nhfp, &bc_objs); /* frees objs in list, sets bc_objs to Null */
+}
+
 /* save one object;
    caveat: this is only for perform_bwrite(); caller handles release_data() */
 static void
-saveobj(NHFILE* nhfp, struct obj* otmp)
+saveobj(NHFILE *nhfp, struct obj *otmp)
 {
     int buflen, zerobuf = 0;
 
@@ -790,6 +860,11 @@ saveobjchn(NHFILE* nhfp, struct obj** obj_p)
             otmp->leashmon = 0;     /* mon->mleashed could still be set;
                                      * unfortunately, we can't clear that
                                      * until after the monster is saved */
+            /* clear 'uball' and 'uchain' pointers if resetting their mask;
+               could also do same for other worn items but don't need to */
+            if ((otmp->owornmask & (W_BALL | W_CHAIN)) != 0)
+                setworn((struct obj *) 0,
+                        otmp->owornmask & (W_BALL | W_CHAIN));
             otmp->owornmask = 0L;   /* no longer care */
             dealloc_obj(otmp);
         }
@@ -1083,6 +1158,7 @@ freedynamicdata(void)
     free_invbuf();           /* let_to_name (invent.c) */
     free_youbuf();           /* You_buf,&c (pline.c) */
     msgtype_free();
+    savedsym_free();
     tmp_at(DISP_FREEMEM, 0); /* temporary display effects */
 #ifdef FREE_ALL_MEMORY
 #define free_current_level() savelev(&tnhfp, -1)

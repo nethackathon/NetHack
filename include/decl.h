@@ -1,4 +1,4 @@
-/* NetHack 3.7  decl.h  $NHDT-Date: 1645000560 2022/02/16 08:36:00 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.283 $ */
+/* NetHack 3.7  decl.h  $NHDT-Date: 1657918080 2022/07/15 20:48:00 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.303 $ */
 /* Copyright (c) Stichting Mathematisch Centrum, Amsterdam, 1985. */
 /*-Copyright (c) Michael Allison, 2007. */
 /* NetHack may be freely redistributed.  See license for details. */
@@ -32,9 +32,9 @@ struct dgn_topology { /* special dungeon levels for speed */
     d_level d_fire_level;
     d_level d_air_level;
     d_level d_astral_level;
-    xchar d_tower_dnum;
-    xchar d_sokoban_dnum;
-    xchar d_mines_dnum, d_quest_dnum;
+    xint16 d_tower_dnum;
+    xint16 d_sokoban_dnum;
+    xint16 d_mines_dnum, d_quest_dnum;
     d_level d_qstart_level, d_qlocate_level, d_nemesis_level;
     d_level d_knox_level;
     d_level d_mineend_level;
@@ -83,32 +83,36 @@ E NEARDATA char tune[6];
 
 #define MAXLINFO (MAXDUNGEON * MAXLEVEL)
 
+/* structure for 'program_state'; not saved and restored */
 struct sinfo {
-    int gameover;  /* self explanatory? */
-    int stopprint; /* inhibit further end of game disclosure */
+    int gameover;               /* self explanatory? */
+    int stopprint;              /* inhibit further end of game disclosure */
 #ifdef HANGUPHANDLING
-    volatile int done_hup; /* SIGHUP or moral equivalent received
-                            * -- no more screen output */
-    int preserve_locks;    /* don't remove level files prior to exit */
+    volatile int done_hup;      /* SIGHUP or moral equivalent received
+                                 * -- no more screen output */
+    int preserve_locks;         /* don't remove level files prior to exit */
 #endif
     int something_worth_saving; /* in case of panic */
     int panicking;              /* `panic' is in progress */
     int exiting;                /* an exit handler is executing */
-    int saving;
-    int restoring;
-    int in_moveloop;
-    int in_impossible;
-    int in_self_recover;
+    int saving;                 /* creating a save file */
+    int restoring;              /* reloading a save file */
+    int in_moveloop;            /* normal gameplay in progress */
+    int in_impossible;          /* reportig a warning */
+    int in_docrt;               /* in docrt(): redrawing the whole screen */
+    int in_self_recover;        /* processsing orphaned level files */
+    int in_checkpoint;          /* saving insurance checkpoint */
     int in_parseoptions;        /* in parseoptions */
     int config_error_ready;     /* config_error_add is ready, available */
+    int beyond_savefile_load;   /* set when past savefile loading */
 #ifdef PANICLOG
-    int in_paniclog;
+    int in_paniclog;            /* writing a panicloc entry */
 #endif
-    int wizkit_wishing;
+    int wizkit_wishing;         /* starting wizard mode game w/ WIZKIT file */
     /* getting_a_command:  only used for ALTMETA config to process ESC, but
        present and updated unconditionally; set by parse() when requesting
        next command keystroke, reset by readchar() as it returns a key */
-    int getting_a_command;
+    int getting_a_command;      /* next key pressed will be entering a cmnd */
 };
 
 /* Flags for controlling uptodate */
@@ -388,8 +392,8 @@ E const char *fqn_prefix_names[PREFIX_COUNT];
 #endif
 
 struct restore_info {
-	const char *name;
-	int mread_flags;
+    const char *name;
+    int mread_flags;
 };
 E struct restore_info restoreinfo;
 
@@ -397,6 +401,8 @@ E NEARDATA struct savefile_info sfcap, sfrestinfo, sfsaveinfo;
 
 struct selectionvar {
     int wid, hei;
+    boolean bounds_dirty;
+    NhRect bounds; /* use selection_getbounds() */
     char *map;
 };
 
@@ -408,7 +414,7 @@ struct autopickup_exception {
 };
 
 struct plinemsg_type {
-    xchar msgtype;  /* one of MSGTYP_foo */
+    xint16 msgtype;  /* one of MSGTYP_foo */
     struct nhregex *regex;
     char *pattern;
     struct plinemsg_type *next;
@@ -434,7 +440,10 @@ E const char *ARGV0;
 enum earlyarg {ARG_DEBUG, ARG_VERSION, ARG_SHOWPATHS
 #ifndef NODUMPENUMS
     , ARG_DUMPENUMS
+#ifdef ENHANCED_SYMBOLS
+    , ARG_DUMPGLYPHIDS
 #endif
+#endif /* NODUMPENUMS */
 #ifdef WIN32
     ,ARG_WINDOWS
 #endif
@@ -454,6 +463,9 @@ enum nh_keyfunc {
     NHKF_GETDIR_SELF,
     NHKF_GETDIR_SELF2,
     NHKF_GETDIR_HELP,
+    NHKF_GETDIR_MOUSE,   /* simulated click for #therecmdmenu; use '_' as
+                          * direction to initiate, then getpos() finishing
+                          * with ',' (left click) or '.' (right click) */
     NHKF_COUNT,
     NHKF_GETPOS_SELF,
     NHKF_GETPOS_PICK,
@@ -498,7 +510,9 @@ struct cmd {
     const char *dirchars;      /* current movement/direction characters */
     const char *alphadirchars; /* same as dirchars if !numpad */
     const struct ext_func_tab *commands[256]; /* indexed by input character */
+    const struct ext_func_tab *mousebtn[NUM_MOUSE_BUTTONS];
     char spkeys[NUM_NHKF];
+    char extcmd_char;      /* key that starts an extended command ('#') */
 };
 
 
@@ -536,7 +550,7 @@ struct xlock_s {
 
 struct trapinfo {
     struct obj *tobj;
-    xchar tx, ty;
+    coordxy tx, ty;
     int time_needed;
     boolean force_bungle;
 };
@@ -555,8 +569,8 @@ enum vanq_order_modes {
 };
 
 struct rogueroom {
-    xchar rlx, rly;
-    xchar dx, dy;
+    coordxy rlx, rly;
+    coordxy dx, dy;
     boolean real;
     uchar doortable;
     int nroom; /* Only meaningful for "real" rooms */
@@ -564,7 +578,7 @@ struct rogueroom {
 
 typedef struct ls_t {
     struct ls_t *next;
-    xchar x, y;  /* source's position */
+    coordxy x, y;  /* source's position */
     short range; /* source's current range */
     short flags;
     short type;  /* type of light source */
@@ -573,7 +587,7 @@ typedef struct ls_t {
 
 struct container {
     struct container *next;
-    xchar x, y;
+    coordxy x, y;
     short what;
     genericptr_t list;
 };
@@ -588,7 +602,7 @@ enum bubble_contains_types {
 #define MAX_BMASK 4
 
 struct bubble {
-    xchar x, y;   /* coordinates of the upper left corner */
+    coordxy x, y;   /* coordinates of the upper left corner */
     schar dx, dy; /* the general direction of the bubble's movement */
     uchar bm[MAX_BMASK + 2];    /* bubble bit mask */
     struct bubble *prev, *next; /* need to traverse the list up and down */
@@ -612,7 +626,7 @@ struct h2o_ctx {
 
 struct launchplace {
     struct obj *obj;
-    xchar x, y;
+    coordxy x, y;
 };
 
 struct repo { /* repossession context */
@@ -649,7 +663,6 @@ struct _create_particular_data {
 };
 
 /* some array sizes for 'g' */
-#define BSIZE 20
 #define WIZKIT_MAX 128
 #define CVT_BUF_SIZE 64
 
@@ -666,16 +679,32 @@ struct _create_particular_data {
 enum cmdq_cmdtypes {
     CMDQ_KEY = 0, /* a literal character, cmdq_add_key() */
     CMDQ_EXTCMD,  /* extended command, cmdq_add_ec() */
+    CMDQ_DIR,     /* direction, cmdq_add_dir() */
+    CMDQ_USER_INPUT, /* placeholder for user input, cmdq_add_userinput() */
+    CMDQ_INT,     /* integer value, cmdq_add_int() */
 };
 
 struct _cmd_queue {
     int typ;
     char key;
+    schar dirx, diry, dirz;
+    int intval;
     const struct ext_func_tab *ec_entry;
     struct _cmd_queue *next;
 };
 
+struct enum_dump {
+    int val;
+    const char *nm;
+};
+
 typedef long cmdcount_nht;	/* Command counts */
+
+enum {
+    CQ_CANNED = 0, /* internal canned sequence */
+    CQ_REPEAT,     /* user-inputted, if g.in_doagain, replayed */
+    NUM_CQS
+};
 
 /*
  * 'g' -- instance_globals holds engine state that does not need to be
@@ -689,7 +718,7 @@ typedef long cmdcount_nht;	/* Command counts */
  */
 struct instance_globals {
 
-    struct _cmd_queue *command_queue;
+    struct _cmd_queue *command_queue[NUM_CQS];
 
     /* apply.c */
     int jumping_is_magic; /* current jump result of magic */
@@ -723,12 +752,6 @@ struct instance_globals {
        which requires a thing and a direction), and the input prompt is
        not shown.  Also, while in_doagain is TRUE, no keystrokes can be
        saved into the saveq. */
-    char pushq[BSIZE];
-    char saveq[BSIZE];
-    int phead;
-    int ptail;
-    int shead;
-    int stail;
     coord clicklook_cc;
     winid en_win;
     boolean en_via_menu;
@@ -833,7 +856,7 @@ struct instance_globals {
 #ifdef MICRO
     char levels[PATHLEN]; /* where levels are */
 #endif /* MICRO */
-    struct sinfo program_state;
+    struct sinfo program_state; /* flags describing game's current state */
 
     /* detect.c */
 
@@ -845,8 +868,8 @@ struct instance_globals {
 
     /* display.c */
     gbuf_entry gbuf[ROWNO][COLNO];
-    xchar gbuf_start[ROWNO];
-    xchar gbuf_stop[ROWNO];
+    coordxy gbuf_start[ROWNO];
+    coordxy gbuf_stop[ROWNO];
 
 
     /* do.c */
@@ -867,9 +890,9 @@ struct instance_globals {
 
     /* dog.c */
     int petname_used; /* user preferred pet name has been used */
-    xchar gtyp;  /* type of dog's current goal */
-    xchar gx; /* x position of dog's current goal */
-    xchar gy; /* y position of dog's current goal */
+    xint16 gtyp;  /* type of dog's current goal */
+    coordxy gx; /* x position of dog's current goal */
+    coordxy gy; /* y position of dog's current goal */
     char dogname[PL_PSIZ];
     char catname[PL_PSIZ];
     char horsename[PL_PSIZ];
@@ -884,8 +907,11 @@ struct instance_globals {
     struct rm nowhere;
     const char *gate_str;
 
-    /* drawing */
+    /* symbols.c */
     struct symsetentry symset[NUM_GRAPHICS];
+#ifdef ENHANCED_SYMBOLS
+    struct symset_customization sym_customizations[NUM_GRAPHICS + 1]; /* adds UNICODESET */
+#endif
     int currentgraphics;
     nhsym showsyms[SYM_MAX]; /* symbols to be displayed */
     nhsym primary_syms[SYM_MAX];   /* loaded primary symbols          */
@@ -938,6 +964,7 @@ struct instance_globals {
     /* hack.c */
     anything tmp_anything;
     int wc; /* current weight_cap(); valid after call to inv_weight() */
+    struct selectionvar *travelmap;
 
     /* insight.c */
 
@@ -951,8 +978,14 @@ struct instance_globals {
        persistent one doesn't get shrunk during filtering for item selection
        then regrown to full inventory, possibly being resized in the process */
     winid cached_pickinv_win;
+    int core_invent_state;
+    int in_sync_perminvent;
+    int perm_invent_toggling_direction;
+    long glyph_reset_timestamp;
+
     /* query objlist callback: return TRUE if obj type matches "this_type" */
     int this_type;
+    const char *this_title; /* title for inventory list of specific type */
     /* query objlist callback: return TRUE if obj is at given location */
     coord only;
 
@@ -975,8 +1008,8 @@ struct instance_globals {
 
     /* mklev.c */
     genericptr_t luathemes[MAXDUNGEON];
-    xchar vault_x;
-    xchar vault_y;
+    coordxy vault_x;
+    coordxy vault_y;
     boolean made_branch; /* used only during level creation */
 
     /* mkmap.c */
@@ -1005,6 +1038,7 @@ struct instance_globals {
     boolean zombify;
     short *animal_list; /* list of PM values for animal monsters */
     int animal_list_count;
+    boolean somebody_can_move;
 
     /* mthrowu.c */
     int mesg_given; /* for m_throw()/thitu() 'miss' message */
@@ -1031,6 +1065,7 @@ struct instance_globals {
 
     /* nhlua.c */
     genericptr_t luacore; /* lua_State * */
+    char lua_warnbuf[BUFSZ];
 
     /* o_init.c */
     short disco[NUM_OBJECTS];
@@ -1054,6 +1089,7 @@ struct instance_globals {
     boolean opt_from_file;
     boolean opt_need_redraw; /* for doset() */
     boolean opt_need_glyph_reset;
+    char *cmdline_windowsys; /* set in unixmain.c */
     /* use menucolors to show colors in the pick-a-color menu */
     boolean save_menucolors; /* copy of iflags.use_menu_colors */
     struct menucoloring *save_colorings; /* copy of g.menu_colorings */
@@ -1159,6 +1195,7 @@ struct instance_globals {
     unsigned usteed_id; /* need to preserve during save */
     struct obj *looseball;  /* track uball during save and... */
     struct obj *loosechain; /* track uchain since saving might free it */
+    d_level uz_save;
 
     /* shk.c */
     /* auto-response flag for/from "sell foo?" 'a' => 'y', 'q' => 'n' */
@@ -1175,8 +1212,8 @@ struct instance_globals {
     lev_region *lregions;
     int num_lregions;
     struct sp_coder *coder;
-    xchar xstart, ystart;
-    xchar xsize, ysize;
+    coordxy xstart, ystart;
+    coordxy xsize, ysize;
     boolean in_mk_themerooms;
     boolean themeroom_failed;
 
@@ -1218,13 +1255,14 @@ struct instance_globals {
     short nocreate4;
     /* uhitm.c */
     boolean override_confirmation; /* Used to flag attacks caused by
-                                      Stormbringer's maliciousness. */
+                                    * Stormbringer's maliciousness. */
 
     /* vision.c */
-    xchar **viz_array; /* used in cansee() and couldsee() macros */
-    xchar *viz_rmin;			/* min could see indices */
-    xchar *viz_rmax;			/* max could see indices */
+    seenV **viz_array; /* used in cansee() and couldsee() macros */
+    coordxy *viz_rmin;			/* min could see indices */
+    coordxy *viz_rmax;			/* max could see indices */
     boolean vision_full_recalc;
+    int seethru; /* 'bubble' debugging: clouds and water don't block light */
 
     /* weapon.c */
     struct obj *propellor;
@@ -1242,6 +1280,8 @@ struct instance_globals {
 
     /* per-level glyph mapping flags */
     long glyphmap_perlevel_flags;
+    int early_raw_messages;   /* if raw_prints occurred early prior
+                                 to g.beyond_savefile_load */
 
     unsigned long magic; /* validate that structure layout is preserved */
 };

@@ -66,7 +66,7 @@
  */
 
 struct window_procs safe_procs = {
-    "safe-startup", 0L, 0L,
+    WPID(safestartup), 0L, 0L,
     {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1}, /* color availability */
     safe_init_nhwindows, safe_player_selection, safe_askname,
     safe_get_nh_event,
@@ -74,7 +74,7 @@ struct window_procs safe_procs = {
     safe_create_nhwindow, safe_clear_nhwindow, safe_display_nhwindow,
     safe_destroy_nhwindow, safe_curs, safe_putstr, safe_putmixed,
     safe_display_file, safe_start_menu, safe_add_menu, safe_end_menu,
-    safe_select_menu, safe_message_menu, safe_update_inventory,
+    safe_select_menu, safe_message_menu,
     safe_mark_synch,
     safe_wait_synch,
 #ifdef CLIPPING
@@ -100,6 +100,8 @@ struct window_procs safe_procs = {
     safe_status_finish, safe_status_enablefield,
     safe_status_update,
     safe_can_suspend,
+    safe_update_inventory,
+    safe_ctrl_nhwindow,
 };
 
 struct window_procs *
@@ -234,6 +236,7 @@ safe_add_menu(
     char ch,                    /* keyboard accelerator (0 = pick our own) */
     char gch,                   /* group accelerator (0 = no group) */
     int attr,                   /* attribute for string (like safe_putstr()) */
+    int clr,                    /* colour for string */
     const char *str,            /* menu string */
     unsigned int itemflags)     /* itemflags such as marked as selected */
 {
@@ -271,12 +274,6 @@ safe_message_menu(
 }
 
 void
-safe_update_inventory(int arg UNUSED)
-{
-    return;
-}
-
-void
 safe_mark_synch(void)
 {
 }
@@ -301,8 +298,8 @@ safe_cliparound(int x, int y)
 void
 safe_print_glyph(
     winid window UNUSED,
-    xchar x UNUSED,
-    xchar y UNUSED,
+    coordxy x UNUSED,
+    coordxy y UNUSED,
     const glyph_info *glyphinfo UNUSED,
     const glyph_info *bkglyphinfo UNUSED)
 {
@@ -334,7 +331,7 @@ safe_nhgetch(void)
  */
 /*ARGSUSED*/
 int
-safe_nh_poskey(int *x, int *y, int *mod)
+safe_nh_poskey(coordxy *x, coordxy *y, int *mod)
 {
     return '\033';
 }
@@ -474,6 +471,21 @@ safe_status_update(
     int color UNUSED,
     unsigned long *colormasks UNUSED)
 {
+}
+
+void
+safe_update_inventory(int arg UNUSED)
+{
+    return;
+}
+
+win_request_info *
+safe_ctrl_nhwindow(
+    winid window,
+    int request,
+    win_request_info *wri)
+{
+    return (win_request_info *) 0;
 }
 
 /**************************************************************

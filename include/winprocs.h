@@ -7,11 +7,20 @@
 
 #include "botl.h"
 
+enum wp_ids { wp_tty = 1, wp_X11, wp_Qt, wp_mswin, wp_curses, 
+              wp_chainin, wp_chainout, wp_safestartup, wp_shim,
+	      wp_hup, wp_guistubs, wp_ttystubs,
+#ifdef OUTDATED_STUFF
+	      , wp_mac, wp_Gem, wp_Gnome, wp_amii, wp_amiv
+#endif
+};
+
 /* NB: this MUST match chain_procs below */
 struct window_procs {
     const char *name;     /* Names should start with [a-z].  Names must
                            * not start with '-'.  Names starting with
                            * '+' are reserved for processors. */
+    enum wp_ids wp_id;
     unsigned long wincap; /* window port capability options supported */
     unsigned long wincap2; /* additional window port capability options */
     boolean has_color[CLR_MAX];
@@ -32,12 +41,11 @@ struct window_procs {
     void (*win_display_file)(const char *, boolean);
     void (*win_start_menu)(winid, unsigned long);
     void (*win_add_menu)(winid, const glyph_info *, const ANY_P *,
-                         char, char, int,
+                         char, char, int, int,
                          const char *, unsigned int);
     void (*win_end_menu)(winid, const char *);
     int (*win_select_menu)(winid, int, MENU_ITEM_P **);
     char (*win_message_menu)(char, int, const char *);
-    void (*win_update_inventory)(int);
     void (*win_mark_synch)(void);
     void (*win_wait_synch)(void);
 #ifdef CLIPPING
@@ -46,12 +54,12 @@ struct window_procs {
 #ifdef POSITIONBAR
     void (*win_update_positionbar)(char *);
 #endif
-    void (*win_print_glyph)(winid, xchar, xchar,
+    void (*win_print_glyph)(winid, coordxy, coordxy,
                             const glyph_info *, const glyph_info *);
     void (*win_raw_print)(const char *);
     void (*win_raw_print_bold)(const char *);
     int (*win_nhgetch)(void);
-    int (*win_nh_poskey)(int *, int *, int *);
+    int (*win_nh_poskey)(coordxy *, coordxy *, int *);
     void (*win_nhbell)(void);
     int (*win_doprev_message)(void);
     char (*win_yn_function)(const char *, const char *, char);
@@ -83,6 +91,8 @@ struct window_procs {
     void (*win_status_update)(int, genericptr_t, int, int, int,
                               unsigned long *);
     boolean (*win_can_suspend)(void);
+    void (*win_update_inventory)(int);
+    win_request_info *(*win_ctrl_nhwindow)(winid, int, win_request_info *);
 };
 
 extern
@@ -164,6 +174,13 @@ extern
  */
 #define status_enablefield (*windowprocs.win_status_enablefield)
 #define status_update (*windowprocs.win_status_update)
+#define ctrl_nhwindow (*windowprocs.win_ctrl_nhwindow)
+
+/*
+ * 
+ */
+#define WPID(name) #name, wp_##name
+#define WPIDMINUS(name) "-" #name, wp_##name 
 
 /*
  * WINCAP
@@ -231,8 +248,10 @@ extern
                                    *    via non-display attribute flag  */
 #define WC2_SUPPRESS_HIST 0x8000L /* 16 putstr(WIN_MESSAGE) supports history
                                    *    suppression via non-disp attr   */
-#define WC2_MENU_SHIFT  0x010000L /* 17 horizontal menu scrolling */
-                                  /* 15 free bits */
+#define WC2_MENU_SHIFT   0x010000L /* 17 horizontal menu scrolling */
+#define WC2_U_UTF8STR    0x020000L /* 18 utf8str support */
+#define WC2_U_24BITCOLOR 0x040000L /* 19 24-bit color support available */
+                                   /* 13 free bits */
 
 #define ALIGN_LEFT   1
 #define ALIGN_RIGHT  2
@@ -274,8 +293,13 @@ struct wc_Opt {
 
 /* Macro for the currently active Window Port whose function
    pointers have been loaded */
+#if 0
+/* 3.7 The string comparison version isn't used anymore */
 #define WINDOWPORT(wn) \
-    (windowprocs.name && !strncmpi((wn), windowprocs.name, strlen((wn))))
+    (windowprocs.name && !strncmpi((#wn), windowprocs.name, strlen((#wn))))
+#endif
+
+#define WINDOWPORT(wn) (windowprocs.wp_id == wp_##wn)
 
 /* role selection by player_selection(); this ought to be in the core... */
 #define RS_NAME    0
@@ -316,6 +340,7 @@ struct chain_procs {
     const char *name;     /* Names should start with [a-z].  Names must
                            * not start with '-'.  Names starting with
                            * '+' are reserved for processors. */
+    enum wp_ids wp_id;
     unsigned long wincap; /* window port capability options supported */
     unsigned long wincap2; /* additional window port capability options */
     boolean has_color[CLR_MAX];
@@ -337,7 +362,7 @@ struct chain_procs {
     void (*win_start_menu)(CARGS, winid, unsigned long);
     void (*win_add_menu)(CARGS, winid, const glyph_info *,
                          const ANY_P *, char, char, int,
-                         const char *, unsigned int);
+                         int, const char *, unsigned int);
     void (*win_end_menu)(CARGS, winid, const char *);
     int (*win_select_menu)(CARGS, winid, int, MENU_ITEM_P **);
     char (*win_message_menu)(CARGS, char, int, const char *);
@@ -350,13 +375,13 @@ struct chain_procs {
 #ifdef POSITIONBAR
     void (*win_update_positionbar)(CARGS, char *);
 #endif
-    void (*win_print_glyph)(CARGS, winid, xchar, xchar,
+    void (*win_print_glyph)(CARGS, winid, coordxy, coordxy,
                             const glyph_info *,
                             const glyph_info *);
     void (*win_raw_print)(CARGS, const char *);
     void (*win_raw_print_bold)(CARGS, const char *);
     int (*win_nhgetch)(CARGS);
-    int (*win_nh_poskey)(CARGS, int *, int *, int *);
+    int (*win_nh_poskey)(CARGS, coordxy *, coordxy *, int *);
     void (*win_nhbell)(CARGS);
     int (*win_doprev_message)(CARGS);
     char (*win_yn_function)
@@ -414,12 +439,11 @@ extern void safe_putmixed(winid, int, const char *);
 extern void safe_display_file(const char *, boolean);
 extern void safe_start_menu(winid, unsigned long);
 extern void safe_add_menu(winid, const glyph_info *, const ANY_P *,
-                          char, char, int, const char *,
+                          char, char, int, int, const char *,
                           unsigned int);
 extern void safe_end_menu(winid, const char *);
 extern int safe_select_menu(winid, int, MENU_ITEM_P **);
 extern char safe_message_menu(char, int, const char *);
-extern void safe_update_inventory(int);
 extern void safe_mark_synch(void);
 extern void safe_wait_synch(void);
 #ifdef CLIPPING
@@ -428,12 +452,12 @@ extern void safe_cliparound(int, int);
 #ifdef POSITIONBAR
 extern void safe_update_positionbar(char *);
 #endif
-extern void safe_print_glyph(winid, xchar, xchar,
+extern void safe_print_glyph(winid, coordxy, coordxy,
                              const glyph_info *, const glyph_info *);
 extern void safe_raw_print(const char *);
 extern void safe_raw_print_bold(const char *);
 extern int safe_nhgetch(void);
-extern int safe_nh_poskey(int *, int *, int *);
+extern int safe_nh_poskey(coordxy *, coordxy *, int *);
 extern void safe_nhbell(void);
 extern int safe_doprev_message(void);
 extern char safe_yn_function(const char *, const char *, char);
@@ -466,6 +490,8 @@ extern void stdio_raw_print(const char *);
 extern void stdio_nonl_raw_print(const char *);
 extern void stdio_raw_print_bold(const char *);
 extern void stdio_wait_synch(void);
+extern void safe_update_inventory(int);
+extern win_request_info *safe_ctrl_nhwindow(winid, int, win_request_info *);
 extern int stdio_nhgetch(void);
 #endif /* SAFEPROCS */
 #endif /* WINPROCS_H */

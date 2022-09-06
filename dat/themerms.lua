@@ -1,4 +1,6 @@
-
+-- NetHack themerms.lua	$NHDT-Date: 1652196294 2022/05/10 15:24:54 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.16 $
+--	Copyright (c) 2020 by Pasi Kallinen
+-- NetHack may be freely redistributed.  See license for details.
 -- themerooms is an array of tables and/or functions.
 -- the tables define "frequency", "contents", "mindiff" and "maxdiff".
 -- frequency is optional; if omitted, 1 is assumed.
@@ -78,8 +80,7 @@ themerooms = {
                     if (percent(25)) then
                        local mintime = 1000 - (nh.level_difficulty() * 100);
                        local ice_melter = function(x,y)
-                          local ax,ay = nh.abscoord(x,y);
-                          nh.start_timer_at(ax,ay, "melt-ice", mintime + nh.rn2(1000));
+                          nh.start_timer_at(x,y, "melt-ice", mintime + nh.rn2(1000));
                        end;
                        ice:iterate(ice_melter);
                     end

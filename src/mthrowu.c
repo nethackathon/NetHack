@@ -9,7 +9,7 @@ static int monmulti(struct monst *, struct obj *, struct obj *);
 static void monshoot(struct monst *, struct obj *, struct obj *);
 static boolean ucatchgem(struct obj *, struct monst *);
 static const char* breathwep_name(int);
-static int drop_throw(struct obj *, boolean, int, int);
+static int drop_throw(struct obj *, boolean, coordxy, coordxy);
 static int m_lined_up(struct monst *, struct monst *);
 
 #define URETREATING(x, y) \
@@ -102,7 +102,7 @@ thitu(
 
     if (u.uac + tlev <= (dieroll = rnd(20))) {
         ++g.mesg_given;
-        if (Blind || !flags.verbose) {
+        if (Blind || !Verbose(2, thitu1)) {
             pline("It misses.");
         } else if (u.uac + tlev <= dieroll - 2) {
             if (onm != onmbuf)
@@ -112,7 +112,7 @@ thitu(
             You("are almost hit by %s.", onm);
         return 0;
     } else {
-        if (Blind || !flags.verbose)
+        if (Blind || !Verbose(2, thitu2))
             You("are hit%s", exclam(dam));
         else
             You("are hit by %s%s", onm, exclam(dam));
@@ -156,8 +156,8 @@ static int
 drop_throw(
     register struct obj *obj,
     boolean ohit,
-    int x,
-    int y)
+    coordxy x,
+    coordxy y)
 {
     int retvalu = 1;
     int create;
@@ -165,7 +165,7 @@ drop_throw(
     struct trap *t;
 
     if (obj->otyp == CREAM_PIE || obj->oclass == VENOM_CLASS
-        || (ohit && is_egg(obj->otyp)))
+        || (ohit && obj->otyp == EGG))
         create = 0;
     else if (ohit && (is_multigen(obj) || obj->otyp == ROCK))
         create = !rn2(3);
@@ -378,7 +378,7 @@ ohitmon(
             seemimic(mtmp);
         mtmp->msleeping = 0;
         if (vis) {
-            if (is_egg(otmp->otyp)) {
+            if (otmp->otyp == EGG) {
                 pline("Splat!  %s is hit with %s egg!", Monnam(mtmp),
                       otmp->known ? an(mons[otmp->corpsenm].pmnames[NEUTRAL])
                                   : "an");
@@ -393,7 +393,7 @@ ohitmon(
                 hit(distant_name(otmp, mshot_xname), mtmp, how);
             }
         } else if (verbose && !g.mtarget)
-            pline("%s%s is hit%s", (is_egg(otmp->otyp)) ? "Splat!  " : "",
+            pline("%s%s is hit%s", (otmp->otyp == EGG) ? "Splat!  " : "",
                   Monnam(mtmp), exclam(damage));
 
         if (otmp->opoisoned && is_poisonable(otmp)) {
@@ -544,8 +544,8 @@ ucatchgem(
 void
 m_throw(
     struct monst *mon,      /* launching monster */
-    int x, int y,           /* launch point */
-    int dx, int dy,         /* direction */
+    coordxy x, coordxy y,           /* launch point */
+    coordxy dx, coordxy dy,         /* direction */
     int range,              /* maximum distance */
     struct obj *obj)        /* missile (or stack providing it) */
 {
@@ -589,7 +589,7 @@ m_throw(
         clear_dknown(singleobj); /* singleobj->dknown = 0; */
 
     if ((singleobj->cursed || singleobj->greased) && (dx || dy) && !rn2(7)) {
-        if (canseemon(mon) && flags.verbose) {
+        if (canseemon(mon) && Verbose(2, m_throw)) {
             if (is_ammo(singleobj))
                 pline("%s misfires!", Monnam(mon));
             else
@@ -777,7 +777,7 @@ int
 thrwmm(struct monst* mtmp, struct monst* mtarg)
 {
     struct obj *otmp, *mwep;
-    register xchar x, y;
+    register coordxy x, y;
     boolean ispole;
 
     /* Polearms won't be applied by monsters against other monsters */
@@ -833,8 +833,8 @@ spitmm(struct monst* mtmp, struct attack* mattk, struct monst* mtarg)
     }
     if (m_lined_up(mtarg, mtmp)) {
         boolean utarg = (mtarg == &g.youmonst);
-        xchar tx = utarg ? mtmp->mux : mtarg->mx;
-        xchar ty = utarg ? mtmp->muy : mtarg->my;
+        coordxy tx = utarg ? mtmp->mux : mtarg->mx;
+        coordxy ty = utarg ? mtmp->muy : mtarg->my;
 
         switch (mattk->adtyp) {
         case AD_BLND:
@@ -886,15 +886,14 @@ breathwep_name(int typ)
     if (Hallucination)
         return rnd_hallublast();
 
-    return breathwep[typ - 1];
+    return breathwep[BZ_OFS_AD(typ)];
 }
 
 /* monster breathes at monster (ranged) */
 int
 breamm(struct monst* mtmp, struct attack* mattk, struct monst* mtarg)
 {
-    /* if new breath types are added, change AD_ACID to max type */
-    int typ = (mattk->adtyp == AD_RBRE) ? rnd(AD_ACID) : mattk->adtyp ;
+    int typ = get_atkdam_type(mattk->adtyp);
 
     if (m_lined_up(mtarg, mtmp)) {
         if (mtmp->mcan) {
@@ -915,12 +914,12 @@ breamm(struct monst* mtmp, struct attack* mattk, struct monst* mtarg)
             return MM_HIT;
 
         if (!mtmp->mspec_used && rn2(3)) {
-            if ((typ >= AD_MAGM) && (typ <= AD_ACID)) {
+            if (BZ_VALID_ADTYP(typ)) {
                 boolean utarget = (mtarg == &g.youmonst);
                 if (canseemon(mtmp))
                     pline("%s breathes %s!",
                           Monnam(mtmp), breathwep_name(typ));
-                dobuzz((int) (-20 - (typ - 1)), (int) mattk->damn,
+                dobuzz(BZ_M_BREATH(BZ_OFS_AD(typ)), (int) mattk->damn,
                        mtmp->mx, mtmp->my, sgn(g.tbx), sgn(g.tby), utarget);
                 nomul(0);
                 /* breath runs out sometimes. Also, give monster some
@@ -972,7 +971,7 @@ void
 thrwmu(struct monst* mtmp)
 {
     struct obj *otmp, *mwep;
-    xchar x, y;
+    coordxy x, y;
     const char *onm;
 
     /* Rearranged beginning so monsters can use polearms not in a line */
@@ -1072,11 +1071,11 @@ breamu(struct monst* mtmp, struct attack* mattk)
    Returns TRUE if fnc returned TRUE. */
 boolean
 linedup_callback(
-    xchar ax,
-    xchar ay,
-    xchar bx,
-    xchar by,
-    boolean (*fnc)(int, int))
+    coordxy ax,
+    coordxy ay,
+    coordxy bx,
+    coordxy by,
+    boolean (*fnc)(coordxy, coordxy))
 {
     int dx, dy;
 
@@ -1110,10 +1109,10 @@ linedup_callback(
 
 boolean
 linedup(
-    register xchar ax,
-    register xchar ay,
-    register xchar bx,
-    register xchar by,
+    register coordxy ax,
+    register coordxy ay,
+    register coordxy bx,
+    register coordxy by,
     int boulderhandling) /* 0=block, 1=ignore, 2=conditionally block */
 {
     int dx, dy, boulderspots;
@@ -1159,8 +1158,8 @@ static int
 m_lined_up(struct monst* mtarg, struct monst* mtmp)
 {
     boolean utarget = (mtarg == &g.youmonst);
-    xchar tx = utarget ? mtmp->mux : mtarg->mx;
-    xchar ty = utarget ? mtmp->muy : mtarg->my;
+    coordxy tx = utarget ? mtmp->mux : mtarg->mx;
+    coordxy ty = utarget ? mtmp->muy : mtarg->my;
     boolean ignore_boulders = utarget && (throws_rocks(mtmp->data)
                                           || m_carrying(mtmp, WAN_STRIKING));
 
@@ -1198,8 +1197,8 @@ m_carrying(struct monst* mtmp, int type)
 void
 hit_bars(
     struct obj **objp,    /* *objp will be set to NULL if object breaks */
-    int objx, int objy,   /* hero's spot (when wielded) or missile's spot */
-    int barsx, int barsy, /* adjacent spot where bars are located */
+    coordxy objx, coordxy objy,   /* hero's spot (when wielded) or missile's spot */
+    coordxy barsx, coordxy barsy, /* adjacent spot where bars are located */
     unsigned breakflags)  /* breakage control */
 {
     struct obj *otmp = *objp;
@@ -1237,8 +1236,8 @@ hit_bars(
 boolean
 hits_bars(
     struct obj **obj_p,   /* *obj_p will be set to NULL if object breaks */
-    int x, int y,
-    int barsx, int barsy,
+    coordxy x, coordxy y,
+    coordxy barsx, coordxy barsy,
     int always_hit,       /* caller can force a hit for items which would
                            * fit through */
     int whodidit)         /* 1==hero, 0=other, -1==just check whether it

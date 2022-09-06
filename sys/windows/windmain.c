@@ -5,6 +5,7 @@
 /* main.c - Windows */
 
 #include "win32api.h" /* for GetModuleFileName */
+
 #include "hack.h"
 #ifdef DLB
 #include "dlb.h"
@@ -34,6 +35,19 @@ extern void mswin_destroy_reg(void);
 extern void backsp(void);
 #endif
 extern void clear_screen(void);
+
+#ifdef update_file
+#undef update_file
+#endif
+#if defined(TERMLIB) || defined(CURSES_GRAPHICS)
+extern void (*decgraphics_mode_callback)(void);
+#endif
+#ifdef CURSES_GRAPHICS
+extern void (*cursesgraphics_mode_callback)(void);
+#endif
+#ifdef ENHANCED_SYMBOLS
+extern void (*utf8graphics_mode_callback)(void);
+#endif
 
 #ifdef _MSC_VER
 #ifdef kbhit
@@ -393,7 +407,8 @@ copy_hack_content()
     update_file(g.fqn_prefix[HACKPREFIX], OPTIONFILE,
         g.fqn_prefix[DATAPREFIX], OPTIONFILE, FALSE);
 }
-
+extern const char *known_handling[];     /* symbols.c */
+extern const char *known_restrictions[]; /* symbols.c */
 /*
  * __MINGW32__ Note
  * If the graphics version is built, we don't need a main; it is skipped
@@ -412,6 +427,11 @@ mingw_main(int argc, char *argv[])
     char *windowtype = NULL;
     char fnamebuf[BUFSZ], encodedfnamebuf[BUFSZ];
     char failbuf[BUFSZ];
+    int getlock_result = 0;
+
+#ifdef _MSC_VER
+    _CrtSetDbgFlag ( _CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF );
+#endif
 
     /*
      * Get a set of valid safe windowport function
@@ -420,7 +440,7 @@ mingw_main(int argc, char *argv[])
     safe_routines();
     early_init();
 #ifdef _MSC_VER
-# ifdef DEBUG
+#ifdef DEBUG
     /* set these appropriately for VS debugging */
     _CrtSetReportMode(_CRT_WARN, _CRTDBG_MODE_DEBUG);
     _CrtSetReportMode(_CRT_ERROR,
@@ -439,7 +459,7 @@ _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);*/
         | _CRTDBG_LEAK_CHECK_DF);
     _CrtSetBreakAlloc(1423);
 */
-# endif
+#endif
 #endif
 
     g.hname = "NetHack"; /* used for syntax messages */
@@ -480,7 +500,7 @@ _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);*/
     }
 
     /* Finished processing options, lock all directory paths */
-    for(int i = 0; i < PREFIX_COUNT; i++)
+    for (int i = 0; i < PREFIX_COUNT; i++)
         fqn_prefix_locked[i] = TRUE;
 
     if (!validate_prefix_locations(failbuf)) {
@@ -491,23 +511,23 @@ _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);*/
 
     copy_hack_content();
 
-/*
- * It seems you really want to play.
- */
-    if (argc >= 1
-        && !strcmpi(default_window_sys, "mswin")
+    /*
+     * It seems you really want to play.
+     */
+    if (argc >= 1 && !strcmpi(default_window_sys, "mswin")
         && (strstri(argv[0], "nethackw.exe") || GUILaunched))
         iflags.windowtype_locked = TRUE;
     windowtype = default_window_sys;
 
 #ifdef DLB
     if (!dlb_init()) {
-        pline("%s\n%s\n%s\n%s\n\n",
-              copyright_banner_line(1), copyright_banner_line(2),
-              copyright_banner_line(3), copyright_banner_line(4));
-        pline("NetHack was unable to open the required file \"%s\"",DLBFILE);
+        pline("%s\n%s\n%s\n%s\n\n", copyright_banner_line(1),
+              copyright_banner_line(2), copyright_banner_line(3),
+              copyright_banner_line(4));
+        pline("NetHack was unable to open the required file \"%s\"", DLBFILE);
         if (file_exists(DLBFILE))
-            pline("\nAre you perhaps trying to run NetHack within a zip utility?");
+            pline("\nAre you perhaps trying to run NetHack within a zip "
+                  "utility?");
         error("dlb_init failure.");
     }
 #endif
@@ -530,15 +550,42 @@ _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);*/
 
     nethack_enter(argc, argv);
     iflags.use_background_glyph = FALSE;
-    if (WINDOWPORT("mswin"))
+    if (WINDOWPORT(mswin))
         iflags.use_background_glyph = TRUE;
-    if (WINDOWPORT("tty"))
+    if (WINDOWPORT(tty))
         consoletty_open(1);
 
     init_nhwindows(&argc, argv);
 
-    if (WINDOWPORT("tty"))
+    if (WINDOWPORT(tty))
         toggle_mouse_support();
+
+    if (g.symset[PRIMARYSET].handling
+        && !symset_is_compatible(g.symset[PRIMARYSET].handling,
+                                 windowprocs.wincap2)) {
+        /* current symset handling and windowtype are
+           not compatible, feature-wise. Use IBM defaults */
+            load_symset("IBMGraphics_2", PRIMARYSET);
+            load_symset("RogueEpyx", ROGUESET);
+    }
+    /* Has the callback for the symset been invoked? Config file processing to
+       load a symset runs too early to accomplish that because 
+       the various *graphics_mode_callback pointers don't get set until
+       term_start_screen, unfortunately */
+#if defined(TERMLIB) || defined(CURSES_GRAPHICS)
+    if (SYMHANDLING(H_DEC) && decgraphics_mode_callback)
+        (*decgraphics_mode_callback)();
+#endif     /* TERMLIB || CURSES */
+#if 0
+#ifdef CURSES_GRAPHICS
+    if (WINDOWPORT(curses))
+        (*cursesgraphics_mode_callback)();
+#endif
+#endif
+#ifdef ENHANCED_SYMBOLS
+    if (SYMHANDLING(H_UTF8) && utf8graphics_mode_callback)
+        (*utf8graphics_mode_callback)();
+#endif
 
     /* strip role,race,&c suffix; calls askname() if g.plname[] is empty
        or holds a generic user name like "player" or "games" */
@@ -556,9 +603,12 @@ _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);*/
         fnamebuf, encodedfnamebuf, BUFSZ);
     Sprintf(g.lock, "%s", encodedfnamebuf);
     /* regularize(lock); */ /* we encode now, rather than substitute */
-    if (getlock() == 0)
+    if ((getlock_result = getlock()) == 0)
         nethack_exit(EXIT_SUCCESS);
 
+    if (getlock_result < 0) {
+        set_savefile_name(TRUE);
+    }
     /* Set up level 0 file to keep the game state.
      */
     nhfp = create_levelfile(0, (char *) 0);
@@ -580,14 +630,17 @@ _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);*/
      * We'll return here if new game player_selection() renames the hero.
      */
 attempt_restore:
-    if ((nhfp = restore_saved_game()) != 0) {
+    if ((getlock_result != -1) && (nhfp = restore_saved_game()) != 0) {
 #ifdef NEWS
         if (iflags.news) {
             display_file(NEWS, FALSE);
             iflags.news = FALSE;
         }
 #endif
-        pline("Restoring save file...");
+        if (g.early_raw_messages)
+            raw_print("Restoring save file...");
+        else
+            pline("Restoring save file...");
         mark_synch(); /* flush output */
         if (dorecover(nhfp)) {
             resuming = TRUE; /* not starting new game */
@@ -604,7 +657,7 @@ attempt_restore:
         if (g.program_state.in_self_recover) {
             g.program_state.in_self_recover = FALSE;
             set_savefile_name(TRUE);
-	}
+        }
     }
 
     if (!resuming) {
@@ -656,7 +709,12 @@ process_options(int argc, char * argv[])
 #ifndef NODUMPENUMS
         if (argcheck(argc, argv, ARG_DUMPENUMS) == 2) {
             nethack_exit(EXIT_SUCCESS);
-       }
+        }
+#ifdef ENHANCED_SYMBOLS
+        if (argcheck(argc, argv, ARG_DUMPGLYPHIDS) == 2) {
+            nethack_exit(EXIT_SUCCESS);
+        }
+#endif
 #endif
         if (argcheck(argc, argv, ARG_DEBUG) == 1) {
             argc--;
@@ -847,7 +905,7 @@ safe_routines(void)
      * Get a set of valid safe windowport function
      * pointers during early startup initialization.
      */
-    if (!WINDOWPORT("safe-startup"))
+    if (!WINDOWPORT(safestartup))
         windowprocs = *get_safe_procs(1);
     if (!GUILaunched)
         windowprocs.win_nhgetch = windows_console_custom_nhgetch;
@@ -1094,7 +1152,7 @@ eraseoldlocks(void)
 int
 getlock(void)
 {
-    int fd, ern = 0, prompt_result = 0;
+    int fd, ern = 0, prompt_result = 1;
     int fcmask = FCMASK;
 #ifndef SELF_RECOVER
     char tbuf[BUFSZ];
@@ -1102,7 +1160,7 @@ getlock(void)
     const char *fq_lock;
 #define OOPS_BUFSZ 512
     char oops[OOPS_BUFSZ];
-    boolean istty = WINDOWPORT("tty");
+    boolean istty = WINDOWPORT(tty);
 
     /* we ignore QUIT and INT at this point */
     if (!lock_file(HLOCK, LOCKPREFIX, 10)) {
@@ -1133,7 +1191,7 @@ getlock(void)
 
     (void) nhclose(fd);
 
-    if (WINDOWPORT("tty"))
+    if (WINDOWPORT(tty))
         prompt_result = tty_self_recover_prompt();
     else
         prompt_result = other_self_recover_prompt();
@@ -1150,7 +1208,7 @@ getlock(void)
                         : "not start a new game");
     if (istty)
         clear_screen();
-    pline(oops);
+    raw_printf("%s", oops);
     if (prompt_result == 1) {          /* recover */
         if (recover_savefile()) {
 #if 0
@@ -1214,7 +1272,7 @@ gotlock:
             error("cannot close lock (%s)", fq_lock);
         }
     }
-    return 1;
+    return prompt_result;
 }
 #endif /* PC_LOCKING */
 
@@ -1270,7 +1328,7 @@ tty_self_recover_prompt(void)
     c = 'n';
     ct = 0;
     saved_procs = windowprocs;
-    if (!WINDOWPORT("safe-startup"))
+    if (!WINDOWPORT(safestartup))
         windowprocs = *get_safe_procs(2); /* arg 2 uses no-newline variant */
     windowprocs.win_nhgetch = windows_console_custom_nhgetch;
     raw_print("\n");
@@ -1330,13 +1388,13 @@ int
 other_self_recover_prompt(void)
 {
     register int c, ci, ct, pl, retval = 0;
-    boolean ismswin = WINDOWPORT("mswin"),
-            iscurses = WINDOWPORT("curses");
+    boolean ismswin = WINDOWPORT(mswin),
+            iscurses = WINDOWPORT(curses);
 
     pl = 1;
     c = 'n';
     ct = 0;
-    if (iflags.window_inited || WINDOWPORT("curses")) {
+    if (iflags.window_inited || WINDOWPORT(curses)) {
         c = yn("There are files from a game in progress under your name. "
                "Recover?");
     } else {

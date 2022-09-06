@@ -9,8 +9,9 @@
 static void dowatersnakes(void);
 static void dowaterdemon(void);
 static void dowaternymph(void);
-static void gush(int, int, genericptr_t);
+static void gush(coordxy, coordxy, genericptr_t);
 static void dofindgem(void);
+static boolean watchman_warn_fountain(struct monst *);
 
 DISABLE_WARNING_FORMAT_NONLITERAL
 
@@ -120,7 +121,7 @@ dogushforth(int drinking)
 }
 
 static void
-gush(int x, int y, genericptr_t poolcnt)
+gush(coordxy x, coordxy y, genericptr_t poolcnt)
 {
     register struct monst *mtmp;
     register struct trap *ttmp;
@@ -163,8 +164,30 @@ dofindgem(void)
     exercise(A_WIS, TRUE); /* a discovery! */
 }
 
+static boolean
+watchman_warn_fountain(struct monst *mtmp)
+{
+    if (is_watch(mtmp->data) && couldsee(mtmp->mx, mtmp->my)
+        && mtmp->mpeaceful) {
+        if (!Deaf) {
+            pline("%s yells:", Amonnam(mtmp));
+            verbalize("Hey, stop using that fountain!");
+        } else {
+            pline("%s earnestly %s %s %s!",
+                  Amonnam(mtmp),
+                  nolimbs(mtmp->data) ? "shakes" : "waves",
+                  mhis(mtmp),
+                  nolimbs(mtmp->data)
+                  ? mbodypart(mtmp, HEAD)
+                  : makeplural(mbodypart(mtmp, ARM)));
+        }
+        return TRUE;
+    }
+    return FALSE;
+}
+
 void
-dryup(xchar x, xchar y, boolean isyou)
+dryup(coordxy x, coordxy y, boolean isyou)
 {
     if (IS_FOUNTAIN(levl[x][y].typ)
         && (!rn2(3) || FOUNTAIN_IS_WARNED(x, y))) {
@@ -173,26 +196,7 @@ dryup(xchar x, xchar y, boolean isyou)
 
             SET_FOUNTAIN_WARNED(x, y);
             /* Warn about future fountain use. */
-            for (mtmp = fmon; mtmp; mtmp = mtmp->nmon) {
-                if (DEADMONSTER(mtmp))
-                    continue;
-                if (is_watch(mtmp->data) && couldsee(mtmp->mx, mtmp->my)
-                    && mtmp->mpeaceful) {
-                    if (!Deaf) {
-                        pline("%s yells:", Amonnam(mtmp));
-                        verbalize("Hey, stop using that fountain!");
-                    } else {
-                        pline("%s earnestly %s %s %s!",
-                              Amonnam(mtmp),
-                              nolimbs(mtmp->data) ? "shakes" : "waves",
-                              mhis(mtmp),
-                              nolimbs(mtmp->data)
-                                      ? mbodypart(mtmp, HEAD)
-                                      : makeplural(mbodypart(mtmp, ARM)));
-                    }
-                    break;
-                }
-            }
+            mtmp = get_iter_mons(watchman_warn_fountain);
             /* You can see or hear this effect */
             if (!mtmp)
                 pline_The("flow reduces to a trickle.");
@@ -332,7 +336,8 @@ drinkfountain(void)
             exercise(A_WIS, TRUE);
             break;
         case 26: /* See Monsters */
-            (void) monster_detect((struct obj *) 0, 0);
+            if (monster_detect((struct obj *) 0, 0))
+                pline_The("%s tastes like nothing.", hliquid("water"));
             exercise(A_WIS, TRUE);
             break;
         case 27: /* Find a gem in the sparkling waters. */
@@ -372,6 +377,8 @@ drinkfountain(void)
 void
 dipfountain(register struct obj *obj)
 {
+    int er = ER_NOTHING;
+
     if (Levitation) {
         floating_above("fountain");
         return;
@@ -420,7 +427,7 @@ dipfountain(register struct obj *obj)
             (void) angry_guards(FALSE);
         return;
     } else {
-        int er = water_damage(obj, NULL, TRUE);
+        er = water_damage(obj, NULL, TRUE);
 
         if (obj->otyp == POT_ACID
             && er != ER_DESTROYED) { /* Acid and water don't mix */
@@ -516,13 +523,17 @@ dipfountain(register struct obj *obj)
         exercise(A_WIS, TRUE);
         newsym(u.ux, u.uy);
         break;
+    default:
+        if (er == ER_NOTHING)
+            pline("Nothing seems to happen.");
+        break;
     }
     update_inventory();
     dryup(u.ux, u.uy, TRUE);
 }
 
 void
-breaksink(int x, int y)
+breaksink(coordxy x, coordxy y)
 {
     if (cansee(x, y) || u_at(x, y))
         pline_The("pipes break!  Water spurts out!");
@@ -621,7 +632,7 @@ drinksink(void)
         pline("This %s contains toxic wastes!", hliquid("water"));
         if (!Unchanging) {
             You("undergo a freakish metamorphosis!");
-            polyself(0);
+            polyself(POLY_NOFLAGS);
         }
         break;
     /* more odd messages --JJB */

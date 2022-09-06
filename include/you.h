@@ -22,9 +22,9 @@ struct RoleName {
 
 struct RoleAdvance {
     /* "fix" is the fixed amount, "rnd" is the random amount */
-    xchar infix, inrnd; /* at character initialization */
-    xchar lofix, lornd; /* gained per level <  g.urole.xlev */
-    xchar hifix, hirnd; /* gained per level >= g.urole.xlev */
+    xint16 infix, inrnd; /* at character initialization */
+    xint16 lofix, lornd; /* gained per level <  g.urole.xlev */
+    xint16 hifix, hirnd; /* gained per level >= g.urole.xlev */
 };
 
 struct u_have {
@@ -198,12 +198,12 @@ struct Role {
 #define ROLE_CHAOTIC   AM_CHAOTIC
 
     /*** Attributes (from attrib.c and exper.c) ***/
-    xchar attrbase[A_MAX];    /* lowest initial attributes */
-    xchar attrdist[A_MAX];    /* distribution of initial attributes */
+    xint16 attrbase[A_MAX];    /* lowest initial attributes */
+    xint16 attrdist[A_MAX];    /* distribution of initial attributes */
     struct RoleAdvance hpadv; /* hit point advancement */
     struct RoleAdvance enadv; /* energy advancement */
-    xchar xlev;               /* cutoff experience level */
-    xchar initrecord;         /* initial alignment record */
+    xint16 xlev;               /* cutoff experience level */
+    xint16 initrecord;         /* initial alignment record */
 
     /*** Spell statistics (from spell.c) ***/
     int spelbase; /* base spellcasting penalty */
@@ -258,8 +258,8 @@ struct Race {
         hatemask;   /* bit mask of always hostile */
 
     /*** Attributes ***/
-    xchar attrmin[A_MAX];     /* minimum allowable attribute */
-    xchar attrmax[A_MAX];     /* maximum allowable attribute */
+    xint16 attrmin[A_MAX];     /* minimum allowable attribute */
+    xint16 attrmax[A_MAX];     /* maximum allowable attribute */
     struct RoleAdvance hpadv; /* hit point advancement */
     struct RoleAdvance enadv; /* energy advancement */
 #if 0 /* DEFERRED */
@@ -327,12 +327,13 @@ struct Align {
 extern const struct Align aligns[]; /* table of available alignments */
 
 enum utraptypes {
-    TT_BEARTRAP   = 0,
-    TT_PIT        = 1,
-    TT_WEB        = 2,
-    TT_LAVA       = 3,
-    TT_INFLOOR    = 4,
-    TT_BURIEDBALL = 5
+    TT_NONE       = 0,
+    TT_BEARTRAP   = 1,
+    TT_PIT        = 2,
+    TT_WEB        = 3,
+    TT_LAVA       = 4,
+    TT_INFLOOR    = 5,
+    TT_BURIEDBALL = 6
 };
 
 enum utotypes {
@@ -346,17 +347,17 @@ enum utotypes {
 
 /*** Information about the player ***/
 struct you {
-    xchar ux, uy;       /* current map coordinates */
-    schar dx, dy, dz;   /* direction of move (or zap or ... ) */
-    schar di;           /* direction of FF */
-    xchar tx, ty;       /* destination of travel */
-    xchar ux0, uy0;     /* initial position FF */
+    coordxy ux, uy;     /* current map coordinates */
+    int dx, dy, dz;     /* x,y,z deltas; direction of move (or zap or ... )
+                         * usually +1 or 0 or -1 */
+    coordxy tx, ty;     /* destination of travel */
+    coordxy ux0, uy0;   /* previous ux,uy */
     d_level uz, uz0;    /* your level on this and the previous turn */
     d_level utolev;     /* level monster teleported you to, or uz */
     uchar utotype;      /* bitmask of goto_level() flags for utolev */
     boolean umoved;     /* changed map location (post-move) */
     int last_str_turn;  /* 0: none, 1: half turn, 2: full turn
-                           +: turn right, -: turn left */
+                         * +: turn right, -: turn left */
     int ulevel;         /* 1 to MAXULEV (30) */
     int ulevelmax;      /* highest level, but might go down (to throttle
                          * lost level recovery via blessed full healing) */
@@ -454,7 +455,7 @@ struct you {
         uhppeak;             /* highest value of uhpmax so far */
     int uen, uenmax,         /* magical energy, aka spell power */
         uenpeak;             /* highest value of uenmax so far */
-    xchar uhpinc[MAXULEV],   /* increases to uhpmax for each level gain */
+    xint16 uhpinc[MAXULEV],  /* increases to uhpmax for each level gain */
           ueninc[MAXULEV];   /* increases to uenmax for each level gain */
     int ugangr;              /* if the gods are angry at you */
     int ugifts;              /* number of artifacts bestowed */
@@ -473,7 +474,7 @@ struct you {
     int ugrave_arise;    /* you die and become something aside from a ghost */
     int weapon_slots;        /* unused skill slots */
     int skills_advanced;     /* # of advances made so far */
-    xchar skill_record[P_SKILL_LIMIT]; /* skill advancements */
+    xint16 skill_record[P_SKILL_LIMIT]; /* skill advancements */
     struct skills weapon_skills[P_NUM_SKILLS];
     boolean twoweap;         /* KMH -- Using two-weapon combat */
     short mcham;             /* vampire mndx if shapeshifted to bat/cloud */

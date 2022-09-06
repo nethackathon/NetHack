@@ -677,7 +677,7 @@ mdrop_obj(
     struct obj *obj,
     boolean verbosely)
 {
-    int omx = mon->mx, omy = mon->my;
+    coordxy omx = mon->mx, omy = mon->my;
     long unwornmask = obj->owornmask;
     /* call distant_name() for its possible side-effects even if the result
        might not be printed, and do it before extracing obj from minvent */
@@ -751,7 +751,7 @@ relobj(
     } /* isgd && has gold */
 
     while ((otmp = (is_pet ? droppables(mtmp) : mtmp->minvent)) != 0) {
-        mdrop_obj(mtmp, otmp, is_pet && flags.verbose);
+        mdrop_obj(mtmp, otmp, is_pet && Verbose(1, relobj));
     }
 
     if (show && cansee(omx, omy))

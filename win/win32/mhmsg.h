@@ -34,8 +34,8 @@ typedef struct mswin_nhmsg_putstr {
 } MSNHMsgPutstr, *PMSNHMsgPutstr;
 
 typedef struct mswin_nhmsg_print_glyph {
-    xchar x;
-    xchar y;
+    coordxy x;
+    coordxy y;
     glyph_info glyphinfo;
     glyph_info bkglyphinfo;
 } MSNHMsgPrintGlyph, *PMSNHMsgPrintGlyph;
@@ -51,6 +51,7 @@ typedef struct mswin_nhmsg_add_menu {
     char accelerator;
     char group_accel;
     int attr;
+    int clr;
     const char *str;
     boolean presel;
     unsigned int itemflags;

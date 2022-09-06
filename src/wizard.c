@@ -314,7 +314,7 @@ strategy(struct monst *mtmp)
    heal or for guardians (Kops) to congregate at to block hero's progress */
 void
 choose_stairs(
-    xchar *sx, xchar *sy, /* output; left as-is if no spot found */
+    coordxy *sx, coordxy *sy, /* output; left as-is if no spot found */
     boolean dir) /* True: forward, False: backtrack (usually up) */
 {
     stairway *stway;
@@ -353,7 +353,7 @@ int
 tactics(struct monst *mtmp)
 {
     unsigned long strat = strategy(mtmp);
-    xchar sx = 0, sy = 0, mx, my;
+    coordxy sx = 0, sy = 0, mx, my;
 
     mtmp->mstrategy =
         (mtmp->mstrategy & (STRAT_WAITMASK | STRAT_APPEARMSG)) | strat;
@@ -394,7 +394,7 @@ tactics(struct monst *mtmp)
     default: /* kill, maim, pillage! */
     {
         long where = (strat & STRAT_STRATMASK);
-        xchar tx = STRAT_GOALX(strat), ty = STRAT_GOALY(strat);
+        coordxy tx = STRAT_GOALX(strat), ty = STRAT_GOALY(strat);
         int targ = (int) (strat & STRAT_GOAL);
         struct obj *otmp;
 
@@ -455,8 +455,7 @@ has_aggravatables(struct monst *mon)
             continue;
         if (in_w_tower != In_W_tower(mtmp->mx, mtmp->my, &u.uz))
             continue;
-        if ((mtmp->mstrategy & STRAT_WAITFORU) != 0
-            || helpless(mtmp))
+        if ((mtmp->mstrategy & STRAT_WAITFORU) != 0 || helpless(mtmp))
             return TRUE;
     }
     return FALSE;
@@ -564,6 +563,9 @@ nasty(struct monst *summoner)
     coord bypos;
     int i, j, count, census, tmp, makeindex,
         s_cls, m_cls, difcap, trylimit, castalign;
+    /* when a monster casts the "summon nasties" spell, it gives feedback;
+       when random post-Wizard harassment casts that, we give feedback */
+    unsigned mmflags = summoner ? MM_NOMSG : NO_MM_FLAGS;
 
 #define MAXNASTIES 10 /* more than this can be created */
 
@@ -624,7 +626,7 @@ nasty(struct monst *summoner)
                 /* this honors genocide but overrides extinction; it ignores
                    inside-hell-only (G_HELL) & outside-hell-only (G_NOHELL) */
                 if ((mtmp = makemon(&mons[makeindex], bypos.x, bypos.y,
-                                    NO_MM_FLAGS)) != 0) {
+                                    mmflags)) != 0) {
                     mtmp->msleeping = mtmp->mpeaceful = mtmp->mtame = 0;
                     set_malign(mtmp);
                 } else {
@@ -632,8 +634,7 @@ nasty(struct monst *summoner)
                        unlike direct choice, not forced to be hostile [why?];
                        limit spellcasters to inhibit chain summoning */
                     if ((mtmp = makemon((struct permonst *) 0,
-                                        bypos.x, bypos.y,
-                                        MM_NOMSG)) != 0) {
+                                        bypos.x, bypos.y, mmflags)) != 0) {
                         m_cls = mtmp->data->mlet;
                         if ((difcap > 0 && mtmp->data->difficulty >= difcap
                              && attacktype(mtmp->data, AT_MAGC))
@@ -688,7 +689,8 @@ resurrect(void)
         mtmp = makemon(&mons[PM_WIZARD_OF_YENDOR], u.ux, u.uy, MM_NOWAIT);
         /* affects experience; he's not coming back from a corpse
            but is subject to repeated killing like a revived corpse */
-        if (mtmp) mtmp->mrevived = 1;
+        if (mtmp)
+            mtmp->mrevived = 1;
     } else {
         /* look for a migrating Wizard */
         verb = "elude";
@@ -708,7 +710,10 @@ resurrect(void)
                     mtmp->mfrozen = 0, mtmp->mcanmove = 1;
                 if (!helpless(mtmp)) {
                     *mmtmp = mtmp->nmon;
-                    mon_arrive(mtmp, TRUE);
+                    mon_arrive(mtmp, -1); /* -1: Wiz_arrive (dog.c) */
+                    /* mx: mon_arrive() might have sent mtmp into limbo */
+                    if (!mtmp->mx)
+                        mtmp = 0;
                     /* note: there might be a second Wizard; if so,
                        he'll have to wait til the next resurrection */
                     break;
@@ -719,7 +724,17 @@ resurrect(void)
     }
 
     if (mtmp) {
-        mtmp->mtame = mtmp->mpeaceful = 0; /* paranoia */
+        /* FIXME: when a new wizard is created by makemon(), it gives
+           a "<mon> appears" message, delivered after he's been placed
+           on the map; however, when an existing wizard comes off
+           migrating_mons, he ends up triggering "<mon> vanishes and
+           reappears" on his first move (tactics when hero is carrying
+           the Amulet); setting STRAT_WAITMASK suppresses that but then
+           he just sits wherever he is, "meditating", contradicting the
+           threatening message below */
+        mtmp->mstrategy &= ~STRAT_WAITMASK;
+
+        mtmp->mtame = 0, mtmp->mpeaceful = 0; /* paranoia */
         set_malign(mtmp);
         if (!Deaf) {
             pline("A voice booms out...");
@@ -734,6 +749,7 @@ void
 intervene(void)
 {
     int which = Is_astralevel(&u.uz) ? rnd(4) : rn2(6);
+
     /* cases 0 and 5 don't apply on the Astral level */
     switch (which) {
     case 0:

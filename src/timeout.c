@@ -1,4 +1,4 @@
-/* NetHack 3.7	timeout.c	$NHDT-Date: 1648318982 2022/03/26 18:23:02 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.137 $ */
+/* NetHack 3.7	timeout.c	$NHDT-Date: 1658390077 2022/07/21 07:54:37 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.142 $ */
 /* Copyright (c) Stichting Mathematisch Centrum, Amsterdam, 1985. */
 /*-Copyright (c) Robert Patrick Rankin, 2018. */
 /* NetHack may be freely redistributed.  See license for details. */
@@ -551,7 +551,7 @@ nh_timeout(void)
          * Luck is based at 0 usually, +1 if a full moon and -1 on Friday 13th
          */
         register int time_luck = stone_luck(FALSE);
-        boolean nostone = !carrying(LUCKSTONE) && !carrying(GOLDEN_EGG) && !stone_luck(TRUE);
+        boolean nostone = !carrying(LUCKSTONE) && !stone_luck(TRUE);
 
         if (u.uluck > baseluck && (nostone || time_luck < 0))
             u.uluck--;
@@ -899,7 +899,7 @@ hatch_egg(anything *arg, long timeout)
     struct obj *egg;
     struct monst *mon, *mon2;
     coord cc;
-    xchar x, y;
+    coordxy x, y;
     boolean yours, silent, knows_egg = FALSE;
     boolean cansee_hatchspot = FALSE;
     int i, mnum, hatchcount = 0;
@@ -1178,7 +1178,7 @@ slip_or_trip(void)
     }
 }
 
-/* Print a lamp flicker message with tailer. */
+/* Print a lamp flicker message with tailer.  Only called if seen. */
 static void
 see_lamp_flicker(struct obj *obj, const char *tailer)
 {
@@ -1193,7 +1193,7 @@ see_lamp_flicker(struct obj *obj, const char *tailer)
     }
 }
 
-/* Print a dimming message for brass lanterns. */
+/* Print a dimming message for brass lanterns.  Only called if seen. */
 static void
 lantern_message(struct obj *obj)
 {
@@ -1221,8 +1221,8 @@ void
 burn_object(anything *arg, long timeout)
 {
     struct obj *obj = arg->a_obj;
-    boolean canseeit, many, menorah, need_newsym, need_invupdate;
-    xchar x, y;
+    boolean canseeit, many, menorah, need_newsym, need_invupdate, bytouch;
+    coordxy x, y;
     char whose[BUFSZ];
 
     menorah = obj->otyp == CANDELABRUM_OF_INVOCATION;
@@ -1240,12 +1240,18 @@ burn_object(anything *arg, long timeout)
                 obj->spe = 0; /* no more candles */
                 obj->owt = weight(obj);
             } else if (Is_candle(obj) || obj->otyp == POT_OIL) {
+                struct monst *mtmp = NULL;
+
+                if (obj->where == OBJ_FLOOR)
+                    mtmp = m_at(obj->ox, obj->oy);
                 /* get rid of candles and burning oil potions;
                    we know this object isn't carried by hero,
                    nor is it migrating */
                 obj_extract_self(obj);
                 obfree(obj, (struct obj *) 0);
                 obj = (struct obj *) 0;
+                if (mtmp)
+                    maybe_unhide_at(mtmp->mx, mtmp->my);
             }
 
         } else {
@@ -1263,6 +1269,11 @@ burn_object(anything *arg, long timeout)
     } else {
         canseeit = FALSE;
     }
+    /* when carrying the light source, you can feel the heat from lit lamp
+       or candle so you'll be notified when it burns out even if blind at
+       the time; brass lantern doesn't radiate sufficient heat for that
+       (however, inventory formatting drops "(lit)" so player can tell) */
+    bytouch = (obj->where == OBJ_INVENT && obj->otyp != BRASS_LANTERN);
     need_newsym = need_invupdate = FALSE;
 
     /* obj->age is the age remaining at this point.  */
@@ -1314,9 +1325,9 @@ burn_object(anything *arg, long timeout)
 
         case 25:
             if (canseeit) {
-                if (obj->otyp == BRASS_LANTERN)
+                if (obj->otyp == BRASS_LANTERN) {
                     lantern_message(obj);
-                else {
+                } else {
                     switch (obj->where) {
                     case OBJ_INVENT:
                     case OBJ_MINVENT:
@@ -1332,7 +1343,7 @@ burn_object(anything *arg, long timeout)
 
         case 0:
             /* even if blind you'll know if holding it */
-            if (canseeit || obj->where == OBJ_INVENT) {
+            if (canseeit || bytouch) {
                 switch (obj->where) {
                 case OBJ_INVENT:
                     need_invupdate = TRUE;
@@ -1410,7 +1421,7 @@ burn_object(anything *arg, long timeout)
 
         case 0:
             /* we know even if blind and in our inventory */
-            if (canseeit || obj->where == OBJ_INVENT) {
+            if (canseeit || bytouch) {
                 if (menorah) {
                     switch (obj->where) {
                     case OBJ_INVENT:
@@ -1456,17 +1467,23 @@ burn_object(anything *arg, long timeout)
             end_burn(obj, FALSE);
 
             if (menorah) {
-                obj->spe = 0;
+                obj->spe = 0; /* no candles */
                 obj->owt = weight(obj);
+                if (carried(obj))
+                    need_invupdate = TRUE;
             } else {
                 if (carried(obj)) {
                     useupall(obj);
                 } else {
+                    boolean onfloor = (obj->where == OBJ_FLOOR);
+
                     /* clear migrating obj's destination code
                        so obfree won't think this item is worn */
                     if (obj->where == OBJ_MIGRATING)
                         obj->owornmask = 0L;
                     obj_extract_self(obj);
+                    if (onfloor)
+                        maybe_unhide_at(x, y);
                     obfree(obj, (struct obj *) 0);
                 }
                 obj = (struct obj *) 0;
@@ -1604,7 +1621,7 @@ begin_burn(struct obj *obj, boolean already_lit)
     }
 
     if (obj->lamplit && !already_lit) {
-        xchar x, y;
+        coordxy x, y;
 
         if (get_obj_location(obj, &x, &y, CONTAINED_TOO | BURIED_TOO))
             new_light_source(x, y, radius, LS_OBJECT, obj_to_any(obj));
@@ -1903,6 +1920,18 @@ wiz_timeout_queue(void)
             }
         }
     }
+    if (u.uswldtim) {
+        putstr(win, 0, "");
+        /* decremented when engulfer makes a move, so can last longer than
+           the number of turns reported if engulfer is slow */
+        Sprintf(buf, "Swallow countdown is %u.", u.uswldtim);
+        putstr(win, 0, buf);
+    }
+    if (u.uinvault) {
+        putstr(win, 0, "");
+        Sprintf(buf, "Vault counter is %d.", u.uinvault);
+        putstr(win, 0, buf);
+    }
     display_nhwindow(win, FALSE);
     destroy_nhwindow(win);
 
@@ -1925,8 +1954,8 @@ timer_sanity_check(void)
             }
         } else if (curr->kind == TIMER_LEVEL) {
             long where = curr->arg.a_long;
-            xchar x = (xchar) ((where >> 16) & 0xFFFF),
-                  y = (xchar) (where & 0xFFFF);
+            coordxy x = (coordxy) ((where >> 16) & 0xFFFF),
+                  y = (coordxy) (where & 0xFFFF);
 
             if (!isok(x, y)) {
                 impossible("timer sanity: spot timer %lu at <%d,%d>",
@@ -2022,6 +2051,7 @@ start_timer(
 long
 stop_timer(short func_index, anything *arg)
 {
+    timeout_proc cleanup_func;
     timer_element *doomed;
     long timeout;
 
@@ -2031,8 +2061,8 @@ stop_timer(short func_index, anything *arg)
         timeout = doomed->timeout;
         if (doomed->kind == TIMER_OBJECT)
             (arg->a_obj)->timed--;
-        if (timeout_funcs[doomed->func_index].cleanup)
-            (*timeout_funcs[doomed->func_index].cleanup)(arg, timeout);
+        if ((cleanup_func = timeout_funcs[doomed->func_index].cleanup) != 0)
+            (*cleanup_func)(arg, timeout);
         free((genericptr_t) doomed);
         return (timeout - g.moves);
     }
@@ -2098,6 +2128,7 @@ obj_split_timers(struct obj* src, struct obj* dest)
 void
 obj_stop_timers(struct obj* obj)
 {
+    timeout_proc cleanup_func;
     timer_element *curr, *prev, *next_timer = 0;
 
     for (prev = 0, curr = g.timer_base; curr; curr = next_timer) {
@@ -2107,9 +2138,8 @@ obj_stop_timers(struct obj* obj)
                 prev->next = curr->next;
             else
                 g.timer_base = curr->next;
-            if (timeout_funcs[curr->func_index].cleanup)
-                (*timeout_funcs[curr->func_index].cleanup)(&curr->arg,
-                                                           curr->timeout);
+            if ((cleanup_func = timeout_funcs[curr->func_index].cleanup) != 0)
+                (*cleanup_func)(&curr->arg, curr->timeout);
             free((genericptr_t) curr);
         } else {
             prev = curr;
@@ -2134,8 +2164,9 @@ obj_has_timer(struct obj* object, short timer_type)
  *
  */
 void
-spot_stop_timers(xchar x, xchar y, short func_index)
+spot_stop_timers(coordxy x, coordxy y, short func_index)
 {
+    timeout_proc cleanup_func;
     timer_element *curr, *prev, *next_timer = 0;
     long where = (((long) x << 16) | ((long) y));
 
@@ -2147,9 +2178,8 @@ spot_stop_timers(xchar x, xchar y, short func_index)
                 prev->next = curr->next;
             else
                 g.timer_base = curr->next;
-            if (timeout_funcs[curr->func_index].cleanup)
-                (*timeout_funcs[curr->func_index].cleanup)(&curr->arg,
-                                                           curr->timeout);
+            if ((cleanup_func = timeout_funcs[curr->func_index].cleanup) != 0)
+                (*cleanup_func)(&curr->arg, curr->timeout);
             free((genericptr_t) curr);
         } else {
             prev = curr;
@@ -2162,7 +2192,7 @@ spot_stop_timers(xchar x, xchar y, short func_index)
  * Returns 0L if no such timer.
  */
 long
-spot_time_expires(xchar x, xchar y, short func_index)
+spot_time_expires(coordxy x, coordxy y, short func_index)
 {
     timer_element *curr;
     long where = (((long) x << 16) | ((long) y));
@@ -2176,7 +2206,7 @@ spot_time_expires(xchar x, xchar y, short func_index)
 }
 
 long
-spot_time_left(xchar x, xchar y, short func_index)
+spot_time_left(coordxy x, coordxy y, short func_index)
 {
     long expires = spot_time_expires(x, y, func_index);
     return (expires > 0L) ? expires - g.moves : 0L;

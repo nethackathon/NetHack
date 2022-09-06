@@ -11,7 +11,7 @@
 
 static void putmesg(const char *);
 static char *You_buf(int);
-#if defined(MSGHANDLER) && (defined(POSIX_TYPES) || defined(__GNUC__))
+#if defined(MSGHANDLER)
 static void execplinehandler(const char *);
 #endif
 #ifdef USER_SOUNDS
@@ -120,6 +120,8 @@ vpline(const char *line, va_list the_args)
         if (vlen >= (int) sizeof pbuf)
             panic("%s: truncation of buffer at %zu of %d bytes",
                   "pline", sizeof pbuf, vlen);
+#else
+        nhUse(vlen);
 #endif
 #else
         Vsprintf(pbuf, line, the_args);
@@ -187,7 +189,7 @@ vpline(const char *line, va_list the_args)
 
     putmesg(line);
 
-#if defined(MSGHANDLER) && (defined(POSIX_TYPES) || defined(__GNUC__))
+#if defined(MSGHANDLER)
     execplinehandler(line);
 #endif
 
@@ -462,6 +464,8 @@ raw_printf(const char *line, ...)
     va_start(the_args, line);
     vraw_printf(line, the_args);
     va_end(the_args);
+    if (!g.program_state.beyond_savefile_load)
+        g.early_raw_messages++;
 }
 
 DISABLE_WARNING_FORMAT_NONLITERAL
@@ -486,9 +490,11 @@ vraw_printf(const char *line, va_list the_args)
         pbuf[BUFSZ - 1] = '\0'; /* terminate strncpy or truncate vsprintf */
     }
     raw_print(line);
-#if defined(MSGHANDLER) && (defined(POSIX_TYPES) || defined(__GNUC__))
+#if defined(MSGHANDLER)
     execplinehandler(line);
 #endif
+    if (!g.program_state.beyond_savefile_load)
+        g.early_raw_messages++;
 }
 
 void
@@ -528,13 +534,15 @@ impossible(const char *s, ...)
 
 RESTORE_WARNING_FORMAT_NONLITERAL
 
-#if defined(MSGHANDLER) && (defined(POSIX_TYPES) || defined(__GNUC__))
+#if defined(MSGHANDLER)
 static boolean use_pline_handler = TRUE;
 
 static void
 execplinehandler(const char *line)
 {
+#if defined(POSIX_TYPES) || defined(__GNUC__)
     int f;
+#endif
     const char *args[3];
     char *env;
 
@@ -546,6 +554,7 @@ execplinehandler(const char *line)
         return;
     }
 
+#if defined(POSIX_TYPES) || defined(__GNUC__)
     f = fork();
     if (f == 0) { /* child */
         args[0] = env;
@@ -566,8 +575,19 @@ execplinehandler(const char *line)
         use_pline_handler = FALSE;
         pline("%s", "Fork to message handler failed.");
     }
+#elif defined(WIN32)
+    {
+        intptr_t ret;
+        args[0] = env;
+        args[1] = line;
+        args[2] = NULL;
+        ret = _spawnv(_P_NOWAIT, env, args);
+    }
+#else
+#error MSGHANDLER is not implemented on this sysytem.
+#endif
 }
-#endif /* MSGHANDLER && (POSIX_TYPES || __GNUC__) */
+#endif /* MSGHANDLER */
 
 /*
  * varargs handling for files.c
@@ -600,6 +620,8 @@ vconfig_error_add(const char *str, va_list the_args)
     if (vlen >= (int) sizeof buf)
         panic("%s: truncation of buffer at %zu of %d bytes",
               "config_error_add", sizeof buf, vlen);
+#else
+    nhUse(vlen);
 #endif
 #else
     Vsprintf(buf, str, the_args);

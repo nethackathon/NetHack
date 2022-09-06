@@ -316,7 +316,7 @@ void intron(void) /* enable kbd interupts if enabled when game started */
 {
 #ifdef TTY_GRAPHICS
     /* Ugly hack to keep from changing tty modes for non-tty games -dlc */
-    if (WINDOWPORT("tty") && intr_char != nonesuch
+    if (WINDOWPORT(tty) && intr_char != nonesuch
         && curttyb2.intr_sym != '\003') {
         curttyb2.intr_sym = '\003';
         setctty();
@@ -328,7 +328,7 @@ void introff(void) /* disable kbd interrupts if required*/
 {
 #ifdef TTY_GRAPHICS
     /* Ugly hack to keep from changing tty modes for non-tty games -dlc */
-    if (WINDOWPORT("tty") && curttyb2.intr_sym != nonesuch) {
+    if (WINDOWPORT(tty) && curttyb2.intr_sym != nonesuch) {
         curttyb2.intr_sym = nonesuch;
         setctty();
     }
@@ -356,7 +356,7 @@ void
 sco_mapon(void)
 {
 #ifdef TTY_GRAPHICS
-    if (WINDOWPORT("tty") && sco_flag_console) {
+    if (WINDOWPORT(tty) && sco_flag_console) {
         if (sco_map_valid != -1) {
             ioctl(0, LDSMAP, sco_chanmap_buf);
         }
@@ -369,7 +369,7 @@ void
 sco_mapoff(void)
 {
 #ifdef TTY_GRAPHICS
-    if (WINDOWPORT("tty") && sco_flag_console) {
+    if (WINDOWPORT(tty) && sco_flag_console) {
         sco_map_valid = ioctl(0, LDGMAP, sco_chanmap_buf);
         if (sco_map_valid != -1) {
             ioctl(0, LDNMAP, (char *) 0);
@@ -390,10 +390,10 @@ void
 init_sco_cons(void)
 {
 #ifdef TTY_GRAPHICS
-    if (WINDOWPORT("tty") && sco_flag_console) {
+    if (WINDOWPORT(tty) && sco_flag_console) {
         atexit(sco_mapon);
         sco_mapoff();
-        load_symset("IBMGraphics", PRIMARY);
+        load_symset("IBMGraphics", PRIMARYSET);
         load_symset("RogueIBM", ROGUESET);
         switch_symbols(TRUE);
 #ifdef TEXTCOLOR
@@ -420,7 +420,7 @@ void
 linux_mapon(void)
 {
 #ifdef TTY_GRAPHICS
-    if (WINDOWPORT("tty") && linux_flag_console) {
+    if (WINDOWPORT(tty) && linux_flag_console) {
         write(1, "\033(B", 3);
     }
 #endif
@@ -430,7 +430,7 @@ void
 linux_mapoff(void)
 {
 #ifdef TTY_GRAPHICS
-    if (WINDOWPORT("tty") && linux_flag_console) {
+    if (WINDOWPORT(tty) && linux_flag_console) {
         write(1, "\033(U", 3);
     }
 #endif
@@ -450,7 +450,7 @@ void
 init_linux_cons(void)
 {
 #ifdef TTY_GRAPHICS
-    if (WINDOWPORT("tty") && linux_flag_console) {
+    if (WINDOWPORT(tty) && linux_flag_console) {
         atexit(linux_mapon);
         linux_mapoff();
 #ifdef TEXTCOLOR
@@ -484,4 +484,16 @@ error(const char *s, ...)
 #endif /* !__begui__ */
 
 RESTORE_WARNING_FORMAT_NONLITERAL
+
+#ifdef ENHANCED_SYMBOLS
+/*
+ * set in tty_start_screen() and allows
+ * OS-specific changes that may be
+ * required for support of utf8.
+ */
+void
+tty_utf8graphics_fixup(void)
+{
+}
+#endif
 

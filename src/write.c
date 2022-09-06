@@ -108,7 +108,7 @@ dowrite(struct obj *pen)
     int basecost, actualcost;
     int curseval;
     char qbuf[QBUFSZ];
-    int first, last, i, deferred, deferralchance;
+    int first, last, i, deferred, deferralchance, real;
     boolean by_descr = FALSE;
     const char *typeword;
 
@@ -128,11 +128,9 @@ dowrite(struct obj *pen)
         return ECMD_CANCEL;
     /* can't write on a novel (unless/until it's been converted into a blank
        spellbook), but we want messages saying so to avoid "spellbook" */
-    typeword = (paper->otyp == SPE_NOVEL)
-                  ? "book"
-                  : (paper->oclass == SPBOOK_CLASS)
-                     ? "spellbook"
-                     : "scroll";
+    typeword = (paper->otyp == SPE_NOVEL) ? "book"
+               : (paper->oclass == SPBOOK_CLASS) ? "spellbook"
+                 : "scroll";
     if (Blind) {
         if (!paper->dknown) {
             You("don't know if that %s is blank or not.", typeword);
@@ -170,26 +168,45 @@ dowrite(struct obj *pen)
         (void) mungspaces(bp + 1);        /* remove the extra space */
     }
 
-    deferred = 0;       /* not any scroll or book */
-    deferralchance = 0; /* incremented for each oc_uname match */
+    deferred = real = 0; /* not any scroll or book */
+    deferralchance = 0;  /* incremented for each oc_uname match */
     first = g.bases[(int) paper->oclass];
     last = g.bases[(int) paper->oclass + 1] - 1;
+    /* first loop: look for match with name/description */
     for (i = first; i <= last; i++) {
         /* extra shufflable descr not representing a real object */
         if (!OBJ_NAME(objects[i]))
             continue;
 
-        if (!strcmpi(OBJ_NAME(objects[i]), nm))
-            goto found;
+        if (!strcmpi(OBJ_NAME(objects[i]), nm)) {
+            if (objects[i].oc_name_known
+                /* spellbooks can only be written by_name, so no need to
+                   hold out for a 'better' by_descr match */
+                || paper->oclass == SPBOOK_CLASS) {
+                goto found;
+            } else {
+                /* save item in case there are no better by_descr matches */
+                real = deferred = i;
+                break;
+            }
+        }
+
         if (!strcmpi(OBJ_DESCR(objects[i]), nm)) {
             by_descr = TRUE;
             goto found;
         }
-        /* user-assigned name might match real name of a later
-           entry, so we don't simply use first match with it;
-           also, player might assign same name multiple times
-           and if so, we choose one of those matches randomly */
+    }
+    /* second loop: look for match with user-assigned name */
+    /* we will get here if 'nm' isn't a real scroll name/descr, or is the name
+     * of a real scroll that hasn't been formally IDed. */
+    for (i = first; i <= last; i++) {
+        /* player might assign same name multiple times and if so,
+           we choose one of those matches randomly */
         if (objects[i].oc_uname && !strcmpi(objects[i].oc_uname, nm)
+            /* prefer attempting to write the real scroll type if
+               the typename clobbers a real scroll and is known to
+               be incorrect */
+            && !(real && objects[i].oc_name_known)
             /*
              * First match: chance incremented to 1,
              *   !rn2(1) is 1, we remember i;
@@ -200,15 +217,17 @@ dowrite(struct obj *pen)
              *   and 2/3 chance to keep previous 50:50
              *   choice; so on for higher match counts.
              */
-            && !rn2(++deferralchance))
+            && !rn2(++deferralchance)) {
             deferred = i;
+            /* writing by user-assigned name is same as by description:
+               fails for books, works for scrolls (having an assigned
+               type name guarantees presence on discoveries list) */
+            by_descr = TRUE;
+        }
     }
-    /* writing by user-assigned name is same as by description:
-       fails for books, works for scrolls (having an assigned
-       type name guarantees presence on discoveries list) */
+
     if (deferred) {
         i = deferred;
-        by_descr = TRUE;
         goto found;
     }
 
@@ -219,6 +238,25 @@ dowrite(struct obj *pen)
     if (i == SCR_BLANK_PAPER || i == SPE_BLANK_PAPER) {
         You_cant("write that!");
         pline("It's obscene!");
+        return ECMD_TIME;
+    } else if (i == SPE_NOVEL) {
+        boolean fanfic = !rn2(3), tearup = !rn2(3);
+
+        if (!fanfic) {
+            You("%s to write the Great Yendorian Novel, but %s inspiration.",
+                !tearup ? "prepare" : "try",
+                !Hallucination ? "lack" : "have too much");
+        } else {
+            You("%sproduce really %s fan-fiction.",
+                !tearup ? "start to " : "",
+                !Hallucination ? "lame" : "awesome");
+        }
+        if (!tearup) {
+            You("give up on the idea.");
+        } else {
+            You("tear it up.");
+            useup(paper);
+        }
         return ECMD_TIME;
     } else if (i == SPE_BOOK_OF_THE_DEAD) {
         pline("No mere dungeon adventurer could write that.");

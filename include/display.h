@@ -1,4 +1,4 @@
-/* NetHack 3.7	display.h	$NHDT-Date: 1641940939 2022/01/11 22:42:19 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.64 $ */
+/* NetHack 3.7	display.h	$NHDT-Date: 1661295667 2022/08/23 23:01:07 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.77 $ */
 /* Copyright (c) Dean Luick, with acknowledgements to Kevin Darcy */
 /* and Dave Cohrs, 1990.                                          */
 /* NetHack may be freely redistributed.  See license for details. */
@@ -17,7 +17,7 @@
  * vobj_at()
  *
  * Returns the head of the list of objects that the player can see
- * at location (x,y).
+ * at location (x,y).  [Vestige of unimplemented invisible objects.]
  */
 #define vobj_at(x, y) (g.level.objects[x][y])
 
@@ -31,8 +31,14 @@
  * (or display non-adjacent, non-submerged ones when hero is underwater),
  * so treat those situations as blocking telepathy, detection, and warning
  * even though conceptually they shouldn't do so.
+ *
+ * [3.7 also] The macros whose name begins with an understore have been
+ * converted to functions in order to have compilers generate smaller code.
+ * The retained underscore versions are still used in display.c but should
+ * only be used in other situations if the function calls actually produce
+ * noticeably slower processing.
  */
-#define tp_sensemon(mon) \
+#define _tp_sensemon(mon) \
     (/* The hero can always sense a monster IF:        */  \
      /* 1. the monster has a brain to sense            */  \
      (!mindless(mon->data))                                \
@@ -42,10 +48,11 @@
           /*        object and in range                */  \
           || (Unblind_telepat                              \
               && (distu(mon->mx, mon->my) <= (BOLT_LIM * BOLT_LIM)))))
+
 /* organized to perform cheaper tests first;
    is_pool() vs is_pool_or_lava(): hero who is underwater can see adjacent
    lava, but presumeably any monster there is on top so not sensed */
-#define sensemon(mon) \
+#define _sensemon(mon) \
     (   (!u.uswallow || (mon) == u.ustuck)                                 \
      && (!Underwater || (distu((mon)->mx, (mon)->my) <= 2                  \
                          && is_pool((mon)->mx, (mon)->my)))                \
@@ -55,7 +62,7 @@
  * mon_warning() is used to warn of any dangerous monsters in your
  * vicinity, and a glyph representing the warning level is displayed.
  */
-#define mon_warning(mon)                                                 \
+#define _mon_warning(mon) \
     (Warning && !(mon)->mpeaceful && (distu((mon)->mx, (mon)->my) < 100) \
      && (((int) ((mon)->m_lev / 4)) >= g.context.warnlevel))
 
@@ -77,13 +84,13 @@
  * reviewing all those instances and also existing mundetected instances.]
  */
 #if 0
-#define mon_visible(mon) \
+#define _mon_visible(mon) \
     (/* The hero can see the monster IF the monster                     */ \
      (!mon->minvis || See_invisible)  /*     1. is not invisible        */ \
      && !mon->mundetected             /* AND 2. not an undetected hider */ \
      && !(mon->mburied || u.uburied)) /* AND 3. neither you nor it is buried */
 #else   /* without 'mburied' and 'uburied' */
-#define mon_visible(mon) \
+#define _mon_visible(mon) \
     (/* The hero can see the monster IF the monster                     */ \
      (!mon->minvis || See_invisible)  /*     1. is not invisible        */ \
      && !mon->mundetected)            /* AND 2. not an undetected hider */
@@ -97,7 +104,7 @@
  * invisible to infravision), because this is usually called from within
  * canseemon() or canspotmon() which already check that.
  */
-#define see_with_infrared(mon)                        \
+#define _see_with_infrared(mon) \
     (!Blind && Infravision && mon && infravisible(mon->data) \
      && couldsee(mon->mx, mon->my))
 
@@ -108,7 +115,7 @@
  * routines.  Like mon_visible(), but it checks to see if the hero sees the
  * location instead of assuming it.  (And also considers worms.)
  */
-#define canseemon(mon)                                                    \
+#define _canseemon(mon) \
     ((mon->wormno ? worm_known(mon)                                       \
                   : (cansee(mon->mx, mon->my) || see_with_infrared(mon))) \
      && mon_visible(mon))
@@ -132,12 +139,17 @@
  * creature in an apparently empty spot.
  * Infravision is not relevant; we assume that invisible monsters are also
  * invisible to infravision.
+ * [3.7: the macro definition erroneously started with 'mtmp->minvis' for
+ * over 20 years.  The one place it's used called it as knowninvisible(mtmp)
+ * so worked by coincidence when there was no argument expansion involved
+ * on the first line.]
  */
-#define knowninvisible(mon)                                               \
-    (mtmp->minvis                                                         \
-     && ((cansee(mon->mx, mon->my) && (See_invisible || Detect_monsters)) \
-         || (!Blind && (HTelepat & ~INTRINSIC)                            \
-             && distu(mon->mx, mon->my) <= (BOLT_LIM * BOLT_LIM))))
+#define _knowninvisible(mon) \
+    ((mon)->minvis                                                      \
+     && ((cansee((mon)->mx, (mon)->my)                                  \
+          && (See_invisible || Detect_monsters))                        \
+         || (!Blind && (HTelepat & ~INTRINSIC)                          \
+             && distu((mon)->mx, (mon)->my) <= (BOLT_LIM * BOLT_LIM))))
 
 /*
  * is_safemon(mon)
@@ -145,7 +157,7 @@
  * A special case check used in attack() and domove().  Placing the
  * definition here is convenient.  No longer limited to pets.
  */
-#define is_safemon(mon) \
+#define _is_safemon(mon) \
     (flags.safe_dog && (mon) && (mon)->mpeaceful && canspotmon(mon)     \
      && !Confusion && !Hallucination && !Stunned)
 
@@ -404,8 +416,8 @@ enum glyphmap_change_triggers { gm_nochange, gm_newgame, gm_levelchange,
  * Altars           Altar (unaligned, chaotic, neutral, lawful, other)
  *                  Count: 5
  *
- * cmap B           S_grave through S_vibrating_square
- *                  Count: (S_vibrating_square - S_grave) + 1 = 37
+ * cmap B           S_grave through S_arrow_trap + TRAPNUM - 1
+ *                  Count: (S_arrow_trap + (TRAPNUM - 1) - S_grave) = 39
  *
  * zap beams        set of four (there are four directions) HI_ZAP.
  *                  Count: 4 * NUM_ZAP
@@ -491,13 +503,13 @@ enum glyph_offsets {
     GLYPH_CMAP_STONE_OFF = (GLYPH_CMAP_OFF),
     GLYPH_CMAP_MAIN_OFF = (1 + GLYPH_CMAP_STONE_OFF),
     GLYPH_CMAP_MINES_OFF = (((S_trwall - S_vwall) + 1) + GLYPH_CMAP_MAIN_OFF),
-    GLYPH_CMAP_GEH_OFF   = (((S_trwall - S_vwall) + 1) + GLYPH_CMAP_MINES_OFF),
-    GLYPH_CMAP_KNOX_OFF  = (((S_trwall - S_vwall) + 1) + GLYPH_CMAP_GEH_OFF),
-    GLYPH_CMAP_SOKO_OFF  = (((S_trwall - S_vwall) + 1) + GLYPH_CMAP_KNOX_OFF),
-    GLYPH_CMAP_A_OFF     = (((S_trwall - S_vwall) + 1) + GLYPH_CMAP_SOKO_OFF),
+    GLYPH_CMAP_GEH_OFF = (((S_trwall - S_vwall) + 1) + GLYPH_CMAP_MINES_OFF),
+    GLYPH_CMAP_KNOX_OFF = (((S_trwall - S_vwall) + 1) + GLYPH_CMAP_GEH_OFF),
+    GLYPH_CMAP_SOKO_OFF = (((S_trwall - S_vwall) + 1) + GLYPH_CMAP_KNOX_OFF),
+    GLYPH_CMAP_A_OFF = (((S_trwall - S_vwall) + 1) + GLYPH_CMAP_SOKO_OFF),
     GLYPH_ALTAR_OFF = (((S_brdnladder - S_ndoor) + 1) + GLYPH_CMAP_A_OFF),
     GLYPH_CMAP_B_OFF = (5 + GLYPH_ALTAR_OFF),
-    GLYPH_ZAP_OFF = (((S_vibrating_square - S_grave) + 1) + GLYPH_CMAP_B_OFF),
+    GLYPH_ZAP_OFF = ((S_arrow_trap + MAXTCHARS - S_grave) + GLYPH_CMAP_B_OFF),
     GLYPH_CMAP_C_OFF = ((NUM_ZAP << 2) + GLYPH_ZAP_OFF),
     GLYPH_SWALLOW_OFF = (((S_goodpos - S_digbeam) + 1) + GLYPH_CMAP_C_OFF),
     GLYPH_EXPLODE_OFF = ((NUMMONS << 3) + GLYPH_SWALLOW_OFF),
@@ -529,58 +541,62 @@ enum glyph_offsets {
 
 #define warning_to_glyph(mwarnlev) ((mwarnlev) + GLYPH_WARNING_OFF)
 #define mon_to_glyph(mon, rng) \
-    ((int) what_mon(monsndx((mon)->data), rng) + \
-            (((mon)->female == 0) ?  GLYPH_MON_MALE_OFF : GLYPH_MON_FEM_OFF))
+    ((int) what_mon(monsndx((mon)->data), rng)                          \
+     + (((mon)->female == 0) ?  GLYPH_MON_MALE_OFF : GLYPH_MON_FEM_OFF))
 #define detected_mon_to_glyph(mon, rng) \
-    ((int) what_mon(monsndx((mon)->data), rng) + \
-            (((mon)->female == 0) ?  GLYPH_DETECT_MALE_OFF : GLYPH_DETECT_FEM_OFF))
+    ((int) what_mon(monsndx((mon)->data), rng)                          \
+     + (((mon)->female == 0) ?  GLYPH_DETECT_MALE_OFF : GLYPH_DETECT_FEM_OFF))
 #define ridden_mon_to_glyph(mon, rng) \
-    ((int) what_mon(monsndx((mon)->data), rng) + \
-            (((mon)->female == 0) ?  GLYPH_RIDDEN_MALE_OFF : GLYPH_RIDDEN_FEM_OFF))
+    ((int) what_mon(monsndx((mon)->data), rng)                          \
+     + (((mon)->female == 0) ?  GLYPH_RIDDEN_MALE_OFF : GLYPH_RIDDEN_FEM_OFF))
 #define pet_to_glyph(mon, rng) \
-    ((int) what_mon(monsndx((mon)->data), rng) + \
-            (((mon)->female == 0) ? GLYPH_PET_MALE_OFF : GLYPH_PET_FEM_OFF))
+    ((int) what_mon(monsndx((mon)->data), rng)                          \
+     + (((mon)->female == 0) ? GLYPH_PET_MALE_OFF : GLYPH_PET_FEM_OFF))
 
+/* treat unaligned as the default instead of explicitly checking for it;
+   altar alignment uses 3 bits with 4 defined values and 4 unused ones */
 #define altar_to_glyph(amsk) \
-    (((amsk & (AM_MASK | AM_SHRINE)) == AM_NONE)               \
-       ? (GLYPH_ALTAR_OFF + altar_unaligned)                   \
-       : (((amsk & AM_SHRINE) == AM_SHRINE)                    \
-          && (Is_astralevel(&u.uz) || Is_sanctum(&u.uz)))      \
-          ? (GLYPH_ALTAR_OFF + altar_other)                    \
-          : ((amsk & AM_MASK) == AM_CHAOTIC)                   \
-            ? (GLYPH_ALTAR_OFF + altar_chaotic)                \
-            : ((amsk & AM_MASK) == AM_NEUTRAL)                 \
-              ? (GLYPH_ALTAR_OFF + altar_neutral)              \
-              : ((amsk & AM_MASK) == AM_LAWFUL)                \
-                ? (GLYPH_ALTAR_OFF + altar_lawful)             \
-                : (GLYPH_ALTAR_OFF + altar_neutral))
+    ((((amsk) & AM_SANCTUM) == AM_SANCTUM)                \
+      ? (GLYPH_ALTAR_OFF + altar_other)                   \
+      : (((amsk) & AM_MASK) == AM_LAWFUL)                 \
+         ? (GLYPH_ALTAR_OFF + altar_lawful)               \
+         : (((amsk) & AM_MASK) == AM_NEUTRAL)             \
+            ? (GLYPH_ALTAR_OFF + altar_neutral)           \
+            : (((amsk) & AM_MASK) == AM_CHAOTIC)          \
+               ? (GLYPH_ALTAR_OFF + altar_chaotic)        \
+               /* (((amsk) & AM_MASK) == AM_UNALIGNED) */ \
+               : (GLYPH_ALTAR_OFF + altar_unaligned))
 
 /* not used, nor is it correct
 #define zap_to_glyph(zaptype, cmap_idx) \
     ((((cmap_idx) - S_vbeam) + 1) + GLYPH_ZAP_OFF)
 */
 
+/* EXPL_FIERY is the default explosion type */
 #define explosion_to_glyph(expltyp, idx) \
-    ((expltyp == EXPL_FROSTY) ?                                 \
-            (((idx) - S_expl_tl) + GLYPH_EXPLODE_FROSTY_OFF)   \
-     : (expltyp == EXPL_FIERY) ?                                \
-            (((idx) - S_expl_tl) + GLYPH_EXPLODE_FIERY_OFF)    \
-     : (expltyp == EXPL_MAGICAL) ?                              \
-            (((idx) - S_expl_tl) + GLYPH_EXPLODE_MAGICAL_OFF)  \
-     : (expltyp == EXPL_WET) ?                                  \
-            (((idx) - S_expl_tl) + GLYPH_EXPLODE_WET_OFF)      \
-     : (expltyp == EXPL_MUDDY) ?                                \
-            (((idx) - S_expl_tl) + GLYPH_EXPLODE_MUDDY_OFF)    \
-     : (expltyp == EXPL_NOXIOUS) ?                              \
-            (((idx) - S_expl_tl) + GLYPH_EXPLODE_NOXIOUS_OFF)  \
-     :       (((idx) - S_expl_tl) + GLYPH_EXPLODE_FIERY_OFF))
+    ((idx) - S_expl_tl                                                  \
+     + (((expltyp) == EXPL_FROSTY) ? GLYPH_EXPLODE_FROSTY_OFF           \
+        : ((expltyp) == EXPL_MAGICAL) ? GLYPH_EXPLODE_MAGICAL_OFF       \
+          : ((expltyp) == EXPL_WET) ? GLYPH_EXPLODE_WET_OFF             \
+           : ((expltyp) == EXPL_MUDDY) ? GLYPH_EXPLODE_MUDDY_OFF        \
+             : ((expltyp) == EXPL_NOXIOUS) ? GLYPH_EXPLODE_NOXIOUS_OFF  \
+               : GLYPH_EXPLODE_FIERY_OFF))
 
+/* cmap_walls_to_glyph(): return the glyph number for specified wall
+   symbol; result varies by dungeon branch */
 #define cmap_walls_to_glyph(cmap_idx) \
-     ( In_mines(&u.uz) ? (((cmap_idx) - S_vwall)  + GLYPH_CMAP_MINES_OFF)       \
-     : In_hell(&u.uz) ? (((cmap_idx) - S_vwall) + GLYPH_CMAP_GEH_OFF)       \
-     : Is_knox(&u.uz) ? (((cmap_idx) - S_vwall) + GLYPH_CMAP_KNOX_OFF)      \
-     : In_sokoban(&u.uz) ? (((cmap_idx) - S_vwall) + GLYPH_CMAP_SOKO_OFF)  \
-     : (((cmap_idx) - S_vwall) + GLYPH_CMAP_MAIN_OFF))
+    ((cmap_idx) - S_vwall                               \
+     + (In_mines(&u.uz) ? GLYPH_CMAP_MINES_OFF          \
+        : In_hell(&u.uz) ? GLYPH_CMAP_GEH_OFF           \
+          : Is_knox(&u.uz) ? GLYPH_CMAP_KNOX_OFF        \
+            : In_sokoban(&u.uz) ? GLYPH_CMAP_SOKO_OFF   \
+              : GLYPH_CMAP_MAIN_OFF))
+
+/* cmap_D0walls_to_glyph(): simpler version of cmap_walls_to_glyph()
+   which returns the glyph that would be used in the main dungeon,
+   regardless of hero's current location */
+#define cmap_D0walls_to_glyph(cmap_idx) \
+    ((cmap_idx) - S_vwall + GLYPH_CMAP_MAIN_OFF)
 
 #define cmap_a_to_glyph(cmap_idx) \
     (((cmap_idx) - S_ndoor) + GLYPH_CMAP_A_OFF)
@@ -592,13 +608,13 @@ enum glyph_offsets {
     (((cmap_idx) - S_digbeam) + GLYPH_CMAP_C_OFF)
 
 #define cmap_to_glyph(cmap_idx) \
-        ( ((cmap_idx) == S_stone) ? GLYPH_CMAP_STONE_OFF                   \
-        : ((cmap_idx) <= S_trwall) ? cmap_walls_to_glyph(cmap_idx)         \
-        : ((cmap_idx) <  S_altar) ? cmap_a_to_glyph(cmap_idx)              \
-        : ((cmap_idx) == S_altar) ? altar_to_glyph(AM_NEUTRAL)             \
-        : ((cmap_idx) <= S_vibrating_square) ? cmap_b_to_glyph(cmap_idx)   \
-        : ((cmap_idx) <= S_goodpos) ? cmap_c_to_glyph(cmap_idx)            \
-        : NO_GLYPH)
+    ( ((cmap_idx) == S_stone)   ? GLYPH_CMAP_STONE_OFF                      \
+    : ((cmap_idx) <= S_trwall)  ? cmap_walls_to_glyph(cmap_idx)             \
+    : ((cmap_idx) <  S_altar)   ? cmap_a_to_glyph(cmap_idx)                 \
+    : ((cmap_idx) == S_altar)   ? altar_to_glyph(AM_NEUTRAL)                \
+    : ((cmap_idx) <  S_arrow_trap + MAXTCHARS) ? cmap_b_to_glyph(cmap_idx)  \
+    : ((cmap_idx) <= S_goodpos) ? cmap_c_to_glyph(cmap_idx)                 \
+      : NO_GLYPH )
 
 #define trap_to_glyph(trap)                                \
     cmap_to_glyph(trap_to_defsym(((int) (trap)->ttyp)))
@@ -621,7 +637,7 @@ enum glyph_offsets {
 
 /* The hero's glyph when seen as a monster.
  */
-#define hero_glyph                                                      \
+#define hero_glyph \
     monnum_to_glyph((Upolyd || !flags.showrace) ? u.umonnum : g.urace.mnum, \
                     (Ugender))
 
@@ -638,45 +654,46 @@ enum glyph_offsets {
  *         to return).
  */
 
-#define glyph_to_trap(glyph)                                                \
-    (glyph_is_trap(glyph) \
+#define glyph_to_trap(glyph) \
+    (glyph_is_trap(glyph)                                                   \
         ? ((int) defsym_to_trap(((glyph) - GLYPH_TRAP_OFF) + S_arrow_trap)) \
         : NO_GLYPH)
 
 #define glyph_is_cmap_main(glyph) \
-    ((glyph) >= GLYPH_CMAP_MAIN_OFF && \
-        (glyph) < (((S_trwall - S_vwall) +1) + GLYPH_CMAP_MAIN_OFF))
+    ((glyph) >= GLYPH_CMAP_MAIN_OFF                                     \
+     && (glyph) < (((S_trwall - S_vwall) +1) + GLYPH_CMAP_MAIN_OFF))
 #define glyph_is_cmap_mines(glyph) \
-    ((glyph) >= GLYPH_CMAP_MINES_OFF && \
-        (glyph) < (((S_trwall - S_vwall) + 1) + GLYPH_CMAP_MINES_OFF))
+    ((glyph) >= GLYPH_CMAP_MINES_OFF                                    \
+     && (glyph) < (((S_trwall - S_vwall) + 1) + GLYPH_CMAP_MINES_OFF))
 #define glyph_is_cmap_gehennom(glyph) \
-    ((glyph) >= GLYPH_CMAP_GEH_OFF && \
-        (glyph) < (((S_trwall - S_vwall) + 1) + GLYPH_CMAP_GEH_OFF))
+    ((glyph) >= GLYPH_CMAP_GEH_OFF                                      \
+     && (glyph) < (((S_trwall - S_vwall) + 1) + GLYPH_CMAP_GEH_OFF))
 #define glyph_is_cmap_knox(glyph) \
-    ((glyph) >= GLYPH_CMAP_KNOX_OFF && \
-        (glyph) < (((S_trwall - S_vwall) + 1) + GLYPH_CMAP_KNOX_OFF))
+    ((glyph) >= GLYPH_CMAP_KNOX_OFF                                     \
+     && (glyph) < (((S_trwall - S_vwall) + 1) + GLYPH_CMAP_KNOX_OFF))
 #define glyph_is_cmap_sokoban(glyph) \
-    ((glyph) >= GLYPH_CMAP_SOKO_OFF && \
-        (glyph) < (((S_trwall - S_vwall) + 1) + GLYPH_CMAP_SOKO_OFF))
+    ((glyph) >= GLYPH_CMAP_SOKO_OFF                                     \
+     && (glyph) < (((S_trwall - S_vwall) + 1) + GLYPH_CMAP_SOKO_OFF))
 #define glyph_is_cmap_a(glyph) \
-    ((glyph) >= GLYPH_CMAP_A_OFF && \
-        (glyph) < (((S_brdnladder - S_ndoor) + 1) + GLYPH_CMAP_A_OFF))
+    ((glyph) >= GLYPH_CMAP_A_OFF                                        \
+     && (glyph) < (((S_brdnladder - S_ndoor) + 1) + GLYPH_CMAP_A_OFF))
 #define glyph_is_cmap_altar(glyph) \
-    ((glyph) >= GLYPH_ALTAR_OFF && \
-        (glyph) < (5 + GLYPH_ALTAR_OFF))
+    ((glyph) >= GLYPH_ALTAR_OFF && (glyph) < (5 + GLYPH_ALTAR_OFF))
 #define glyph_is_cmap_b(glyph) \
-    ((glyph) >= GLYPH_CMAP_B_OFF && \
-        ((glyph) < (((S_vibrating_square - S_grave) + 1) + GLYPH_CMAP_B_OFF)))
+    ((glyph) >= GLYPH_CMAP_B_OFF                                        \
+     && ((glyph) < ((S_arrow_trap + MAXTCHARS - S_grave) + GLYPH_CMAP_B_OFF)))
 #define glyph_is_cmap_zap(glyph) \
     ((glyph) >= GLYPH_ZAP_OFF && (glyph) < ((NUM_ZAP << 2) + GLYPH_ZAP_OFF))
 #define glyph_is_cmap_c(glyph) \
-    ((glyph) >= GLYPH_CMAP_C_OFF && \
-        (glyph) < (((S_goodpos - S_digbeam) + 1) + GLYPH_CMAP_C_OFF))
+    ((glyph) >= GLYPH_CMAP_C_OFF                                        \
+     && (glyph) < (((S_goodpos - S_digbeam) + 1) + GLYPH_CMAP_C_OFF))
 #define glyph_is_swallow(glyph) \
-    ((glyph) >= GLYPH_SWALLOW_OFF && (glyph) < (((NUMMONS << 3) + GLYPH_SWALLOW_OFF)))
+    ((glyph) >= GLYPH_SWALLOW_OFF                                       \
+     && (glyph) < (((NUMMONS << 3) + GLYPH_SWALLOW_OFF)))
 #define glyph_is_explosion(glyph) \
-    ((glyph) >= GLYPH_EXPLODE_OFF && \
-        (glyph) < (MAXEXPCHARS + GLYPH_EXPLODE_FROSTY_OFF))
+    ((glyph) >= GLYPH_EXPLODE_OFF                                       \
+     && (glyph) < (MAXEXPCHARS + GLYPH_EXPLODE_FROSTY_OFF))
+#if 0   /* this is more precise but expands to a lot of unnecessary code */
 #define glyph_is_cmap(glyph) \
     (((glyph) == GLYPH_CMAP_STONE_OFF) \
      || glyph_is_cmap_main(glyph)      \
@@ -688,29 +705,36 @@ enum glyph_offsets {
      || glyph_is_cmap_altar(glyph)     \
      || glyph_is_cmap_b(glyph)         \
      || glyph_is_cmap_c(glyph))
+#endif
+#define glyph_is_cmap(glyph) \
+    ((glyph) >= GLYPH_CMAP_STONE_OFF \
+     && (glyph) < (GLYPH_CMAP_C_OFF + ((S_goodpos - S_digbeam) + 1)))
 
+/* final MAXPCHARS is legal array index because of trailing fencepost entry */
 #define glyph_to_cmap(glyph) \
-    (((glyph) == GLYPH_CMAP_STONE_OFF)                                 \
-      ? S_stone                                                        \
-      : glyph_is_cmap_main(glyph)                                      \
-        ? (((glyph) - GLYPH_CMAP_MAIN_OFF) + S_vwall)                  \
-        : glyph_is_cmap_mines(glyph)                                   \
-          ? (((glyph) - GLYPH_CMAP_MINES_OFF) + S_vwall)               \
-          : glyph_is_cmap_gehennom(glyph)                              \
-            ? (((glyph) - GLYPH_CMAP_GEH_OFF) + S_vwall)               \
-            : glyph_is_cmap_knox(glyph)                                \
-              ? (((glyph) - GLYPH_CMAP_KNOX_OFF) + S_vwall)            \
-              : glyph_is_cmap_sokoban(glyph)                           \
-                ? (((glyph) - GLYPH_CMAP_SOKO_OFF) + S_vwall)          \
-                : glyph_is_cmap_a(glyph)                               \
-                  ? (((glyph) - GLYPH_CMAP_A_OFF) + S_ndoor)           \
-                  : glyph_is_cmap_altar(glyph)                         \
-                    ? (S_altar)                                        \
-                    : glyph_is_cmap_b(glyph)                           \
-                      ? (((glyph) - GLYPH_CMAP_B_OFF) + S_grave)       \
-                      : glyph_is_cmap_c(glyph)                         \
-                        ? (((glyph) - GLYPH_CMAP_C_OFF) + S_digbeam)   \
-                        : NO_GLYPH)
+    (((glyph) == GLYPH_CMAP_STONE_OFF)                                  \
+      ? S_stone                                                         \
+      : glyph_is_cmap_main(glyph)                                       \
+        ? (((glyph) - GLYPH_CMAP_MAIN_OFF) + S_vwall)                   \
+        : glyph_is_cmap_mines(glyph)                                    \
+          ? (((glyph) - GLYPH_CMAP_MINES_OFF) + S_vwall)                \
+          : glyph_is_cmap_gehennom(glyph)                               \
+            ? (((glyph) - GLYPH_CMAP_GEH_OFF) + S_vwall)                \
+            : glyph_is_cmap_knox(glyph)                                 \
+              ? (((glyph) - GLYPH_CMAP_KNOX_OFF) + S_vwall)             \
+              : glyph_is_cmap_sokoban(glyph)                            \
+                ? (((glyph) - GLYPH_CMAP_SOKO_OFF) + S_vwall)           \
+                : glyph_is_cmap_a(glyph)                                \
+                  ? (((glyph) - GLYPH_CMAP_A_OFF) + S_ndoor)            \
+                  : glyph_is_cmap_altar(glyph)                          \
+                    ? (S_altar)                                         \
+                    : glyph_is_cmap_b(glyph)                            \
+                      ? (((glyph) - GLYPH_CMAP_B_OFF) + S_grave)        \
+                      : glyph_is_cmap_c(glyph)                          \
+                        ? (((glyph) - GLYPH_CMAP_C_OFF) + S_digbeam)    \
+                        : glyph_is_cmap_zap(glyph)                      \
+                          ? ((((glyph) - GLYPH_ZAP_OFF) % 4) + S_vbeam) \
+                          : MAXPCHARS)
 
 #define glyph_to_swallow(glyph) \
     (glyph_is_swallow(glyph) ? (((glyph) - GLYPH_SWALLOW_OFF) & 0x7) : 0)
@@ -734,20 +758,20 @@ enum glyph_offsets {
 #define glyph_is_pet(glyph) \
     (glyph_is_male_pet(glyph) || glyph_is_female_pet(glyph))
 #define glyph_is_ridden_female_monster(glyph) \
-    ((glyph) >= GLYPH_RIDDEN_FEM_OFF && (glyph) < \
-        (GLYPH_RIDDEN_FEM_OFF + NUMMONS))
+    ((glyph) >= GLYPH_RIDDEN_FEM_OFF                    \
+     && (glyph) < (GLYPH_RIDDEN_FEM_OFF + NUMMONS))
 #define glyph_is_ridden_male_monster(glyph) \
-    ((glyph) >= GLYPH_RIDDEN_MALE_OFF && (glyph) < \
-        (GLYPH_RIDDEN_MALE_OFF + NUMMONS))
+    ((glyph) >= GLYPH_RIDDEN_MALE_OFF                   \
+     && (glyph) < (GLYPH_RIDDEN_MALE_OFF + NUMMONS))
 #define glyph_is_ridden_monster(glyph) \
     (glyph_is_ridden_male_monster(glyph) \
         || glyph_is_ridden_female_monster(glyph))
 #define glyph_is_detected_female_monster(glyph) \
-    ((glyph) >= GLYPH_DETECT_FEM_OFF && (glyph) < \
-        (GLYPH_DETECT_FEM_OFF + NUMMONS))
+    ((glyph) >= GLYPH_DETECT_FEM_OFF                    \
+     && (glyph) < (GLYPH_DETECT_FEM_OFF + NUMMONS))
 #define glyph_is_detected_male_monster(glyph) \
-    ((glyph) >= GLYPH_DETECT_MALE_OFF && (glyph) < \
-        (GLYPH_DETECT_MALE_OFF + NUMMONS))
+    ((glyph) >= GLYPH_DETECT_MALE_OFF                   \
+     && (glyph) < (GLYPH_DETECT_MALE_OFF + NUMMONS))
 #define glyph_is_detected_monster(glyph) \
     (glyph_is_detected_male_monster(glyph) \
         || glyph_is_detected_female_monster(glyph))
@@ -756,6 +780,7 @@ enum glyph_offsets {
      || glyph_is_ridden_monster(glyph) || glyph_is_detected_monster(glyph))
 #define glyph_is_invisible(glyph) ((glyph) == GLYPH_INVISIBLE)
 
+/* final NUMMONS is legal array index because of trailing fencepost entry */
 #define glyph_to_mon(glyph) \
        (glyph_is_normal_female_monster(glyph)                  \
          ? ((glyph) - GLYPH_MON_FEM_OFF)                       \
@@ -773,63 +798,64 @@ enum glyph_offsets {
                      ? ((glyph) - GLYPH_RIDDEN_FEM_OFF)        \
                      : glyph_is_ridden_male_monster(glyph)     \
                        ? ((glyph) - GLYPH_RIDDEN_MALE_OFF)     \
-                       : NO_GLYPH)
+                       : NUMMONS)
 
 #define obj_is_piletop(obj) \
-    ((obj)->where == OBJ_FLOOR                                   \
-        && g.level.objects[(obj)->ox][(obj)->oy]                  \
-            && g.level.objects[(obj)->ox][(obj)->oy]->nexthere)
+    ((obj)->where == OBJ_FLOOR                                  \
+        /*&& g.level.objects[(obj)->ox][(obj)->oy]*/            \
+        && g.level.objects[(obj)->ox][(obj)->oy]->nexthere)
 
 #define glyph_is_body_piletop(glyph) \
-    (((glyph) >= GLYPH_BODY_PILETOP_OFF) \
-                 && ((glyph) < (GLYPH_BODY_PILETOP_OFF + NUMMONS)))
+    (((glyph) >= GLYPH_BODY_PILETOP_OFF)                        \
+     && ((glyph) < (GLYPH_BODY_PILETOP_OFF + NUMMONS)))
 #define glyph_is_body(glyph) \
     ((((glyph) >= GLYPH_BODY_OFF) && ((glyph) < (GLYPH_BODY_OFF + NUMMONS))) \
-    || glyph_is_body_piletop(glyph))
+     || glyph_is_body_piletop(glyph))
 
 #define glyph_is_fem_statue_piletop(glyph) \
-    (((glyph) >= GLYPH_STATUE_FEM_PILETOP_OFF) \
+    (((glyph) >= GLYPH_STATUE_FEM_PILETOP_OFF)                  \
       && ((glyph) < (GLYPH_STATUE_FEM_PILETOP_OFF + NUMMONS)))
 #define glyph_is_male_statue_piletop(glyph) \
-     (((glyph) >= GLYPH_STATUE_MALE_PILETOP_OFF) \
+    (((glyph) >= GLYPH_STATUE_MALE_PILETOP_OFF)                 \
          && ((glyph) < (GLYPH_STATUE_MALE_PILETOP_OFF + NUMMONS)))
 #define glyph_is_fem_statue(glyph) \
-    ((((glyph) >= GLYPH_STATUE_FEM_OFF) && \
-        ((glyph) < (GLYPH_STATUE_FEM_OFF + NUMMONS))) \
+    ((((glyph) >= GLYPH_STATUE_FEM_OFF)                         \
+      && ((glyph) < (GLYPH_STATUE_FEM_OFF + NUMMONS)))          \
      || glyph_is_fem_statue_piletop(glyph))
 #define glyph_is_male_statue(glyph) \
-    ((((glyph) >= GLYPH_STATUE_MALE_OFF) &&            \
-        ((glyph) < (GLYPH_STATUE_MALE_OFF + NUMMONS))) \
+    ((((glyph) >= GLYPH_STATUE_MALE_OFF)                        \
+      && ((glyph) < (GLYPH_STATUE_MALE_OFF + NUMMONS)))         \
      || glyph_is_male_statue_piletop(glyph))
 #define glyph_is_statue(glyph) \
     (glyph_is_male_statue(glyph) || glyph_is_fem_statue(glyph))
 #define glyph_is_normal_piletop_obj(glyph) \
-    (((glyph) >= GLYPH_OBJ_PILETOP_OFF) && \
-        ((glyph) < (GLYPH_OBJ_PILETOP_OFF + NUM_OBJECTS)))
+    (((glyph) >= GLYPH_OBJ_PILETOP_OFF)                         \
+     && ((glyph) < (GLYPH_OBJ_PILETOP_OFF + NUM_OBJECTS)))
 #define glyph_is_normal_object(glyph) \
-     ((((glyph) >= GLYPH_OBJ_OFF) && \
-        ((glyph) < (GLYPH_OBJ_OFF + NUM_OBJECTS))) \
-      || glyph_is_normal_piletop_obj(glyph))
+    ((((glyph) >= GLYPH_OBJ_OFF)                                \
+      && ((glyph) < (GLYPH_OBJ_OFF + NUM_OBJECTS)))             \
+     || glyph_is_normal_piletop_obj(glyph))
 
 #if 0
 #define glyph_is_object(glyph) \
-((((glyph) >= GLYPH_OBJ_OFF) && ((glyph) < (GLYPH_OBJ_OFF + NUM_OBJECTS))) \
- || (((glyph) >= GLYPH_OBJ_PILETOP_OFF) \
-     && ((glyph) < (GLYPH_OBJ_PILETOP_OFF + NUM_OBJECTS))) \
- || (((glyph) >= GLYPH_STATUE_MALE_OFF) \
-     && ((glyph) < (GLYPH_STATUE_MALE_OFF + NUMMONS))) \
- || (((glyph) >= GLYPH_STATUE_MALE_PILETOP_OFF) \
-     && ((glyph) < (GLYPH_STATUE_MALE_PILETOP_OFF + NUMMONS))) \
- || (((glyph) >= GLYPH_STATUE_FEM_OFF) \
-     && ((glyph) < (GLYPH_STATUE_FEM_OFF + NUMMONS))) \
- || (((glyph) >= GLYPH_STATUE_FEM_PILETOP_OFF) \
-     && ((glyph) < (GLYPH_STATUE_FEM_PILETOP_OFF + NUMMONS))) \
- || (((glyph) >= GLYPH_BODY_OFF) && ((glyph) < (GLYPH_BODY_OFF + NUMMONS))) \
- || (((glyph) >= GLYPH_BODY_PILETOP_OFF) \
-     && ((glyph) < (GLYPH_BODY_PILETOP_OFF + NUMMONS))))
+  ((((glyph) >= GLYPH_OBJ_OFF) && ((glyph) < (GLYPH_OBJ_OFF + NUM_OBJECTS))) \
+   || (((glyph) >= GLYPH_OBJ_PILETOP_OFF)                               \
+       && ((glyph) < (GLYPH_OBJ_PILETOP_OFF + NUM_OBJECTS)))            \
+   || (((glyph) >= GLYPH_STATUE_MALE_OFF)                               \
+       && ((glyph) < (GLYPH_STATUE_MALE_OFF + NUMMONS)))                \
+   || (((glyph) >= GLYPH_STATUE_MALE_PILETOP_OFF)                       \
+       && ((glyph) < (GLYPH_STATUE_MALE_PILETOP_OFF + NUMMONS)))        \
+   || (((glyph) >= GLYPH_STATUE_FEM_OFF)                                \
+       && ((glyph) < (GLYPH_STATUE_FEM_OFF + NUMMONS)))                 \
+   || (((glyph) >= GLYPH_STATUE_FEM_PILETOP_OFF)                        \
+       && ((glyph) < (GLYPH_STATUE_FEM_PILETOP_OFF + NUMMONS)))         \
+   || (((glyph) >= GLYPH_BODY_OFF)                                      \
+       && ((glyph) < (GLYPH_BODY_OFF + NUMMONS)))                       \
+   || (((glyph) >= GLYPH_BODY_PILETOP_OFF)                              \
+       && ((glyph) < (GLYPH_BODY_PILETOP_OFF + NUMMONS))))
 #endif
-#define glyph_is_object(glyph)                               \
-    (glyph_is_normal_object(glyph) || glyph_is_statue(glyph) \
+#define glyph_is_object(glyph) \
+    (glyph_is_normal_object(glyph) || glyph_is_statue(glyph)    \
      || glyph_is_body(glyph))
 
 /* briefly used for Qt's "paper doll" inventory which shows map tiles for
@@ -837,8 +863,8 @@ enum glyph_offsets {
    so this isn't used anywhere */
 #define obj_to_true_glyph(obj)                                  \
     (((obj)->otyp == STATUE)                                    \
-     ? ((int) (obj)->corpsenm +                                 \
-        (((obj)->spe & CORPSTAT_GENDER) == CORPSTAT_FEMALE)     \
+     ? ((int) (obj)->corpsenm                                   \
+        + (((obj)->spe & CORPSTAT_GENDER) == CORPSTAT_FEMALE)   \
              ? (obj_is_piletop(obj)                             \
                 ? (GLYPH_STATUE_FEM_PILETOP_OFF)                \
                 : (GLYPH_STATUE_FEM_OFF))                       \
@@ -846,28 +872,26 @@ enum glyph_offsets {
                 ? (GLYPH_STATUE_MALE_PILETOP_OFF)               \
                 : (GLYPH_STATUE_MALE_OFF))                      \
      : (((obj)->otyp == CORPSE)                                 \
-         ? ((int) (obj)->corpsenm +                             \
-             (obj_is_piletop(obj)                               \
+         ? ((int) (obj)->corpsenm                               \
+            + (obj_is_piletop(obj)                              \
                 ? (GLYPH_BODY_PILETOP_OFF)                      \
                 ? (GLYPH_BODY_OFF)))                            \
          : ((int) (obj)->otyp + GLYPH_OBJ_OFF))))
 
+/* final NUM_OBJECTS is legal array idx because of trailing fencepost entry */
 #define glyph_to_obj(glyph) \
-    (glyph_is_body(glyph)                            \
-       ? CORPSE                                      \
-       : glyph_is_statue(glyph)                      \
-         ? STATUE                                    \
-         : glyph_is_normal_object(glyph)             \
-           ? ((glyph) -                              \
-               (glyph_is_normal_piletop_obj(glyph)   \
-                 ? GLYPH_OBJ_PILETOP_OFF             \
-                 : GLYPH_OBJ_OFF))                   \
-           : NO_GLYPH)
+    (glyph_is_body(glyph) ? CORPSE                              \
+     : glyph_is_statue(glyph) ? STATUE                          \
+       : glyph_is_normal_object(glyph)                          \
+           ? ((glyph) - (glyph_is_normal_piletop_obj(glyph)     \
+                           ? GLYPH_OBJ_PILETOP_OFF              \
+                           : GLYPH_OBJ_OFF))                    \
+           : NUM_OBJECTS)
 
 #define glyph_to_body_corpsenm(glyph) \
-            (glyph_is_body_piletop(glyph)               \
-                ? ((glyph) - GLYPH_BODY_PILETOP_OFF)    \
-                : ((glyph) - GLYPH_BODY_OFF))
+    (glyph_is_body_piletop(glyph)                       \
+       ? ((glyph) - GLYPH_BODY_PILETOP_OFF)             \
+       : ((glyph) - GLYPH_BODY_OFF))
 
 #define glyph_to_statue_corpsenm(glyph) \
     (glyph_is_fem_statue_piletop(glyph)                 \
@@ -880,11 +904,11 @@ enum glyph_offsets {
                    ? ((glyph) - GLYPH_STATUE_MALE_OFF)  \
                    : NO_GLYPH)
 
-/* These have the unfortunate side effect of needing a global variable    */
+/* These have the unfortunate side effect of needing a global variable  */
 /* to store a result. 'otg_temp' is defined and declared in decl.{ch}.  */
 #define random_obj_to_glyph(rng) \
-    ((g.otg_temp = random_object(rng)) == CORPSE                   \
-         ? (random_monster(rng) + GLYPH_BODY_OFF)                  \
+    ((g.otg_temp = random_object(rng)) == CORPSE        \
+         ? (random_monster(rng) + GLYPH_BODY_OFF)       \
          : (g.otg_temp + GLYPH_OBJ_OFF))
 #define corpse_to_glyph(obj) \
     ((int) ((obj)->corpsenm + (obj_is_piletop(obj)        \
@@ -898,58 +922,57 @@ enum glyph_offsets {
    also done so that special levels such a Sokoban can "hide" items
    under the boulders. */
 #define normal_obj_to_glyph(obj) \
-    ((int) ((obj)->otyp + \
-            ((obj_is_piletop(obj) && ((obj)->otyp != BOULDER))      \
-                                ? GLYPH_OBJ_PILETOP_OFF             \
-                                : GLYPH_OBJ_OFF)))
+    ((int) ((obj)->otyp + ((obj_is_piletop(obj) && ((obj)->otyp != BOULDER)) \
+                           ? GLYPH_OBJ_PILETOP_OFF                           \
+                           : GLYPH_OBJ_OFF)))
 
 /* MRKR: Statues now have glyphs corresponding to the monster they    */
 /*       represent and look like monsters when you are hallucinating. */
 
 #define statue_to_glyph(obj, rng) \
     ((Hallucination)                                                \
-     ? ((random_monster(rng)) +                                     \
-          ((!(rng)(2)) ? GLYPH_MON_MALE_OFF : GLYPH_MON_FEM_OFF))   \
-     : ((int) (obj)->corpsenm +                                     \
-               ((((obj)->spe & CORPSTAT_GENDER) == CORPSTAT_FEMALE) \
-                    ? (obj_is_piletop(obj)                          \
-                          ? GLYPH_STATUE_FEM_PILETOP_OFF            \
-                          : GLYPH_STATUE_FEM_OFF)                   \
-                    : (obj_is_piletop(obj)                          \
-                          ? GLYPH_STATUE_MALE_PILETOP_OFF           \
-                          : GLYPH_STATUE_MALE_OFF))))
+     ? ((random_monster(rng))                                       \
+        + ((!(rng)(2)) ? GLYPH_MON_MALE_OFF : GLYPH_MON_FEM_OFF))   \
+     : ((int) (obj)->corpsenm                                       \
+        + ((((obj)->spe & CORPSTAT_GENDER) == CORPSTAT_FEMALE)      \
+           ? (obj_is_piletop(obj)                                   \
+              ? GLYPH_STATUE_FEM_PILETOP_OFF                        \
+              : GLYPH_STATUE_FEM_OFF)                               \
+           : (obj_is_piletop(obj)                                   \
+              ? GLYPH_STATUE_MALE_PILETOP_OFF                       \
+              : GLYPH_STATUE_MALE_OFF))))
 
 #define obj_to_glyph(obj, rng) \
-           (((obj)->otyp == STATUE)                   \
-               ? statue_to_glyph(obj, rng)            \
-               : ((Hallucination)                     \
-                    ? random_obj_to_glyph(rng)        \
-                    : (((obj)->otyp == CORPSE)        \
-                        ? corpse_to_glyph(obj)        \
-                        : normal_obj_to_glyph(obj))))
+    (((obj)->otyp == STATUE)                             \
+        ? statue_to_glyph(obj, rng)                      \
+        : ((Hallucination)                               \
+             ? random_obj_to_glyph(rng)                  \
+             : (((obj)->otyp == CORPSE)                  \
+                  ? corpse_to_glyph(obj)                 \
+                  : normal_obj_to_glyph(obj))))
 
 #define GLYPH_TRAP_OFF \
     (GLYPH_CMAP_B_OFF + (S_arrow_trap - S_grave))
-#define glyph_is_trap(glyph)      \
-    ((glyph) >= (GLYPH_TRAP_OFF) && \
-     (glyph) < ((GLYPH_TRAP_OFF) + (TRAPNUM - 1)))
-#define glyph_is_warning(glyph)   \
-    ((glyph) >= GLYPH_WARNING_OFF \
+#define glyph_is_trap(glyph) \
+    ((glyph) >= (GLYPH_TRAP_OFF)                        \
+     && (glyph) < ((GLYPH_TRAP_OFF) + MAXTCHARS))
+#define glyph_is_warning(glyph) \
+    ((glyph) >= GLYPH_WARNING_OFF                       \
      && (glyph) < (GLYPH_WARNING_OFF + WARNCOUNT))
 #define glyph_is_unexplored(glyph) ((glyph) == GLYPH_UNEXPLORED)
 #define glyph_is_nothing(glyph) ((glyph) == GLYPH_NOTHING)
 
-/*
+#if 0
 #define glyph_is_piletop(glyph) \
     (glyph_is_body_piletop(glyph) || glyph_is_statue_piletop(glyph) \
         || glyph_is_obj_piletop(glyph))
-*/
+#endif
 
 /* mgflags for altering map_glyphinfo() internal behaviour */
-#define MG_FLAG_NORMAL      0x00
+#define MG_FLAG_NORMAL     0x00
 #define MG_FLAG_NOOVERRIDE 0x01 /* disregard accessibility override values */
 
-/* Special mapped glyphflags encoded by reset_glyphmap() and/or map_glyphinfo() */
+/* Special mapped glyphflags encoded by reset_glyphmap() + map_glyphinfo() */
 #define MG_HERO    0x00001  /* represents the hero */
 #define MG_CORPSE  0x00002  /* represents a body */
 #define MG_INVIS   0x00004  /* represents invisible monster */
@@ -959,16 +982,18 @@ enum glyph_offsets {
 #define MG_STATUE  0x00040  /* represents a statue */
 #define MG_OBJPILE 0x00080  /* more than one stack of objects */
 #define MG_BW_LAVA 0x00100  /* 'black & white lava': highlight lava if it
-                               can't be distringuished from water by color */
+                             * can't be distinguished from water by color */
 #define MG_BW_ICE  0x00200  /* similar for ice vs floor */
+#define MG_BW_SINK 0x00200  /* identical for sink vs fountain [note: someday
+                             * this may become a distinct flag */
 #define MG_NOTHING 0x00400  /* char represents GLYPH_NOTHING */
 #define MG_UNEXPL  0x00800  /* char represents GLYPH_UNEXPLORED */
-#define MG_MALE    0x01000  /* represents a male mon variation or statue of one */
-#define MG_FEMALE  0x02000  /* represents a female mon variation or statue of one */
+#define MG_MALE    0x01000  /* represents a male mon or statue of one */
+#define MG_FEMALE  0x02000  /* represents a female mon or statue of one */
 #define MG_BADXY   0x04000  /* bad coordinates were passed */
 
 typedef struct {
-    xchar gnew; /* perhaps move this bit into the rm structure. */
+    xint8 gnew; /* perhaps move this bit into the rm structure. */
     glyph_info glyphinfo;
 } gbuf_entry;
 

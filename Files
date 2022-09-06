@@ -252,9 +252,9 @@ region.c    restore.c   rip.c       rnd.c       role.c      rumors.c
 save.c      sfstruct.c  shk.c       shknam.c    sit.c       sounds.c
 sp_lev.c    spell.c     steal.c     steed.c     symbols.c   sys.c
 teleport.c  timeout.c   topten.c    track.c     trap.c      u_init.c
-uhitm.c     vault.c     version.c   vision.c    weapon.c    were.c
-wield.c     windows.c   wizard.c    worm.c      worn.c      write.c
-zap.c
+uhitm.c     utf8map.c   vault.c     version.c   vision.c    weapon.c
+were.c      wield.c     windows.c   wizard.c    worm.c      worn.c
+write.c     zap.c
 
 submodules:
 (files in top directory)
@@ -270,13 +270,13 @@ README.md  libtest.c  run.sh
 
 sys/msdos:
 (files for MSDOS version)
-Install.dos              Makefile.GCC             fetch-cross-compiler.sh
-msdos.c                  msdoshlp.txt             nhlua.h
-pckeys.c                 pctiles.c                pctiles.h
-pcvideo.h                portio.h                 setup.bat
-sysconf                  tile2bin.c               vesa.h
-video.c                  vidtxt.c                 vidvesa.c
-vidvga.c
+Install.dos              Makefile.GCC             exceptn.S.patch
+fetch-cross-compiler.sh  msdos.c                  msdoshlp.txt
+nhlua.h                  pckeys.c                 pctiles.c
+pctiles.h                pcvideo.h                portio.h
+setup.bat                sysconf                  tile2bin.c
+vesa.h                   video.c                  vidtxt.c
+vidvesa.c                vidvga.c
 
 (files for running MSDOS binary under Windows)
 nhico.uu  nhpif.uu
@@ -350,8 +350,8 @@ unix
 
 sys/unix/hints/include:
 (files for configuring UNIX NetHack versions)
-compiler.370    cross-post.370  cross-pre.370   multiw-1.370
-multiw-2.370
+compiler.370      cross-post.370    cross-pre.370     gbdates-post.370
+gbdates-pre.370   multiw-1.370      multiw-2.370
 
 sys/vms:
 (files for VMS version)
@@ -363,7 +363,7 @@ vmsmain.c     vmsmisc.c     vmstty.c      vmsunix.c
 sys/windows:
 (files for Windows 7/8.x/10/11 version)
 .nethackrc.template      Install.windows          Makefile.mingw32
-Makefile.mingw32.depend  Makefile.msc             console.rc
+Makefile.mingw32.depend  Makefile.nmake           console.rc
 consoletty.c             nethack.def              nhico.uu
 nhsetup.bat              ntsound.c                porthelp
 stubs.c                  sysconf.template         win10.c

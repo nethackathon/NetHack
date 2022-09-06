@@ -50,7 +50,7 @@ void trace_putmixed(void *,winid, int, const char *);
 void trace_display_file(void *,const char *, boolean);
 void trace_start_menu(void *,winid, unsigned long);
 void trace_add_menu(void *,winid, const glyph_info *, const ANY_P *,
-		                         char, char, int,
+		                         char, char, int, int,
 					                          const char *, unsigned int);
 void trace_end_menu(void *,winid, const char *);
 int trace_select_menu(void *,winid, int, MENU_ITEM_P **);
@@ -64,12 +64,12 @@ void trace_cliparound(void *,int, int);
 #ifdef POSITIONBAR
 void trace_update_positionbar(void *,char *);
 #endif
-void trace_print_glyph(void *,winid, xchar, xchar,
+void trace_print_glyph(void *,winid, coordxy, coordxy,
 		                            const glyph_info *, const glyph_info *);
 void trace_raw_print(void *,const char *);
 void trace_raw_print_bold(void *,const char *);
 int trace_nhgetch(void *);
-int trace_nh_poskey(void *,int *, int *, int *);
+int trace_nh_poskey(void *,coordxy *, coordxy *, int *);
 void trace_nhbell(void *);
 int trace_doprev_message(void *);
 char trace_yn_function(void *,const char *, const char *, char);
@@ -446,6 +446,7 @@ trace_add_menu(
     char ch,                    /* keyboard accelerator (0 = pick our own) */
     char gch,                   /* group accelerator (0 = no group) */
     int attr,                   /* attribute for string (like tty_putstr()) */
+    int clr,                   /* color for string */
     const char *str,            /* menu string */
     unsigned int itemflags)     /* itemflags such as marked as selected */
 {
@@ -480,7 +481,7 @@ trace_add_menu(
 
     PRE;
     (*tdp->nprocs->win_add_menu)(tdp->ndata, window, glyphinfo,
-                                 identifier,ch, gch, attr, str, itemflags);
+                                 identifier,ch, gch, attr, clr, str, itemflags);
     POST;
 }
 
@@ -644,8 +645,8 @@ void
 trace_print_glyph(
     void *vp,
     winid window,
-    xchar x,
-    xchar y,
+    coordxy x,
+    coordxy y,
     const glyph_info *glyphinfo,
     const glyph_info *bkglyphinfo)
 {
@@ -723,8 +724,8 @@ trace_nhgetch(void *vp)
 int
 trace_nh_poskey(
     void *vp,
-    int *x,
-    int *y,
+    coordxy *x,
+    coordxy *y,
     int *mod)
 {
     struct trace_data *tdp = vp;
@@ -741,7 +742,8 @@ trace_nh_poskey(
     } else {
         sprintf(buf, "(%d)", rv);
     }
-    fprintf(wc_tracelogf, "%s=> %s (%d, %d, %d)\n", INDENT, buf, *x, *y,
+    fprintf(wc_tracelogf, "%s=> %s (%d, %d, %d)\n", INDENT, buf,
+            (int) *x, (int) *y,
             *mod);
 
     return rv;

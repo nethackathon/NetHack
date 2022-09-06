@@ -1,4 +1,4 @@
-/* NetHack 3.7	objnam.c	$NHDT-Date: 1646688068 2022/03/07 21:21:08 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.348 $ */
+/* NetHack 3.7	objnam.c	$NHDT-Date: 1654557302 2022/06/06 23:15:02 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.368 $ */
 /* Copyright (c) Stichting Mathematisch Centrum, Amsterdam, 1985. */
 /*-Copyright (c) Robert Patrick Rankin, 2011. */
 /* NetHack may be freely redistributed.  See license for details. */
@@ -271,6 +271,7 @@ safe_typename(int otyp)
         || !OBJ_NAME(objects[otyp])) {
         res = nextobuf();
         Sprintf(res, "glorkum[%d]", otyp);
+        impossible("safe_typename: %s", res);
     } else {
         /* force it to be treated as fully discovered */
         save_nameknown = objects[otyp].oc_name_known;
@@ -301,7 +302,7 @@ distant_name(
     char *(*func)(OBJ_P)) /* formatting routine (usually xname or doname) */
 {
     char *str;
-    xchar ox = 0, oy = 0;
+    coordxy ox = 0, oy = 0;
         /*
          * (r * r): square of the x or y distance;
          * (r * r) * 2: sum of squares of both x and y distances
@@ -501,8 +502,8 @@ xname_flags(
 {
     register char *buf;
     char *obufp;
-    register int typ = obj->otyp;
-    register struct objclass *ocl = &objects[typ];
+    int typ = obj->otyp;
+    struct objclass *ocl = &objects[typ];
     int nn = ocl->oc_name_known, omndx = obj->corpsenm;
     const char *actualn = OBJ_NAME(*ocl);
     const char *dn = OBJ_DESCR(*ocl);
@@ -685,15 +686,11 @@ xname_flags(
                doname() so we've added an external flag to request it */
             Strcat(buf, "partly eaten ");
         }
-        if (obj->globby) {
-            Sprintf(eos(buf), "%s%s",
-                    (obj->owt <= 100)
-                       ? "small "
-                       : (obj->owt > 500)
-                          ? "very large "
-                          : (obj->owt > 300)
-                             ? "large "
-                             : "medium ",
+        if (obj->globby) { /* 3.7 added "medium" to replace no-prefix */
+            Sprintf(eos(buf), "%s %s", (obj->owt <= 100) ? "small"
+                                       : (obj->owt <= 300) ? "medium"
+                                         : (obj->owt <= 500) ? "large"
+                                           : "very large",
                     actualn);
             break;
         }
@@ -838,6 +835,7 @@ xname_flags(
     }
     default:
         Sprintf(buf, "glorkum %d %d %d", obj->oclass, typ, obj->spe);
+        impossible("xname_flags: %s", buf);
         break;
     }
     if (pluralize) {
@@ -877,7 +875,11 @@ xname_flags(
     if (has_oname(obj) && dknown) {
         Strcat(buf, " named ");
  nameit:
+        obufp = eos(buf);
         Strcat(buf, ONAME(obj));
+        /* downcase "The" in "<quest-artifact-item> named The ..." */
+        if (obj->oartifact && !strncmp(obufp, "The ", 4))
+            *obufp = lowc(*obufp); /* = 't'; */
     }
 
     if (!strncmpi(buf, "the ", 4))
@@ -1333,9 +1335,21 @@ doname_base(
     case BALL_CLASS:
     case CHAIN_CLASS:
         add_erosion_words(obj, prefix);
-        if (obj->owornmask & W_BALL)
-            Strcat(bp, " (chained to you)");
+        if (obj->owornmask & (W_BALL | W_CHAIN))
+            Sprintf(eos(bp), " (%s to you)",
+                    (obj->owornmask & W_BALL) ? "chained" : "attached");
         break;
+    }
+
+    if ((obj->otyp == STATUE || obj->otyp == CORPSE || obj->otyp == FIGURINE)
+        && wizard && iflags.wizmgender) {
+        int cgend = (obj->spe & CORPSTAT_GENDER),
+            mgend = ((cgend == CORPSTAT_MALE) ? MALE
+                     : (cgend == CORPSTAT_FEMALE) ? FEMALE
+                       : NEUTRAL);
+        Sprintf(eos(bp), " (%s)",
+                cgend != CORPSTAT_RANDOM ? genders[mgend].adj
+                                         : "unspecified gender");
     }
 
     if ((obj->owornmask & W_WEP) && !g.mrg_to_wielded) {
@@ -1560,11 +1574,6 @@ corpse_xname(
         mnam = OBJ_NAME(objects[otmp->otyp]); /* "glob of <monster>" */
     } else if (omndx == NON_PM) { /* paranoia */
         mnam = "thing";
-        /* [Possible enhancement:  check whether corpse has monster traits
-            attached in order to use priestname() for priests and minions.] */
-    } else if (omndx == PM_ALIGNED_CLERIC) {
-        /* avoid "aligned priest"; it just exposes internal details */
-        mnam = "priest";
     } else {
         mnam = obj_pmname(otmp);
         if (the_unique_pm(&mons[omndx]) || type_is_pname(&mons[omndx])) {
@@ -1911,7 +1920,10 @@ the(const char* str)
         /* some objects have capitalized adjectives in their names */
         if (((tmp = rindex(str, ' ')) != 0 || (tmp = rindex(str, '-')) != 0)
             && (tmp[1] < 'A' || tmp[1] > 'Z')) {
-            insert_the = TRUE;
+            /* insert "the" unless we have an apostrophe (where we assume
+               we're dealing with "Unique's corpse" when "Unique" wasn't
+               caught by CapitalMon() above) */
+            insert_the = !index(str, '\'');
         } else if (tmp && index(str, ' ') < tmp) { /* has spaces */
             /* it needs an article if the name contains "of" */
             tmp = strstri(str, " of ");
@@ -1939,7 +1951,7 @@ the(const char* str)
 }
 
 char *
-The(const char* str)
+The(const char *str)
 {
     char *tmp = the(str);
 
@@ -1949,7 +1961,7 @@ The(const char* str)
 
 /* returns "count cxname(otmp)" or just cxname(otmp) if count == 1 */
 char *
-aobjnam(struct obj* otmp, const char* verb)
+aobjnam(struct obj *otmp, const char *verb)
 {
     char prefix[PREFIX];
     char *bp = cxname(otmp);
@@ -2360,7 +2372,8 @@ static const char *const as_is[] = {
     "tuna",    "yaki",      "-hai",      "krill",     "manes",
     "moose",   "ninja",     "sheep",     "ronin",     "roshi",
     "shito",   "tengu",     "ki-rin",    "Nazgul",    "gunyoki",
-    "piranha", "samurai",   "shuriken",  "haggis", 0,
+    "piranha", "samurai",   "shuriken",  "haggis",    "Bordeaux",
+    0,
     /* Note:  "fish" and "piranha" are collective plurals, suitable
        for "wiped out all <foo>".  For "3 <foo>", they should be
        "fishes" and "piranhas" instead.  We settle for collective
@@ -2454,7 +2467,8 @@ singplur_compound(char *str)
           " versus ", " from ",    " in ",
           " on ",     " a la ",    " with", /* " with "? */
           " de ",     " d'",       " du ",
-          "-in-",     "-at-",      0
+          " au ",     "-in-",      "-at-",
+          0
         }, /* list of first characters for all compounds[] entries */
         compound_start[] = " -";
 
@@ -2567,6 +2581,7 @@ makeplural(const char* oldstr)
     {
         static const char *const already_plural[] = {
             "ae",  /* algae, larvae, &c */
+            "eaux", /* chateaux, gateaux */
             "matzot", 0,
         };
 
@@ -2625,6 +2640,13 @@ makeplural(const char* oldstr)
         Strcasecpy(spot - 1, "es");
         goto bottom;
     }
+    /* -eau/-eaux (gateau, chapeau...) */
+    if (len >= 3 && !strcmpi(spot - 2, "eau")
+        /* 'bureaus' is the more common plural of 'bureau' */
+        && BSTRCMPI(str, spot - 5, "bureau")) {
+        Strcasecpy(spot + 1, "x");
+        goto bottom;
+    }
     /* matzoh/matzot, possible food name */
     if (len >= 6
         && (!strcmpi(spot - 5, "matzoh") || !strcmpi(spot - 5, "matzah"))) {
@@ -2637,7 +2659,6 @@ makeplural(const char* oldstr)
         goto bottom;
     }
 
-    /* note: -eau/-eaux (gateau, bordeau...) */
     /* note: ox/oxen, VAX/VAXen, goose/geese */
 
     lo_c = lowc(*spot);
@@ -2796,8 +2817,9 @@ makesingular(const char* oldstr)
             goto bottom;
         }
         /* matzot -> matzo, algae -> alga */
-        if (!BSTRCMPI(bp, p - 6, "matzot") || !BSTRCMPI(bp, p - 2, "ae")) {
-            *(p - 1) = '\0'; /* drop t/e */
+        if (!BSTRCMPI(bp, p - 6, "matzot") || !BSTRCMPI(bp, p - 2, "ae")
+            || !BSTRCMPI(bp, p - 4, "eaux")) {
+            *(p - 1) = '\0'; /* drop t/e/x */
             goto bottom;
         }
         /* balactheria -> balactherium */
@@ -3048,6 +3070,8 @@ static const struct alt_spellings {
     { "gauntlets of giant strength", GAUNTLETS_OF_POWER },
     { "elven chain mail", ELVEN_MITHRIL_COAT },
     { "potion of sleep", POT_SLEEPING },
+    { "scroll of recharging", SCR_CHARGING },
+    { "recharging", SCR_CHARGING },
     { "stone", ROCK },
     { "camera", EXPENSIVE_CAMERA },
     { "tee shirt", T_SHIRT },
@@ -3188,7 +3212,8 @@ wizterrainwish(struct _readobjnam_data *d)
 {
     struct rm *lev;
     boolean madeterrain = FALSE, badterrain = FALSE, didblock;
-    int trap, oldtyp, x = u.ux, y = u.uy;
+    int trap, oldtyp;
+    coordxy x = u.ux, y = u.uy;
     char *bp = d->bp, *p = d->p;
 
     for (trap = NO_TRAP + 1; trap < TRAPNUM; trap++) {
@@ -3371,14 +3396,15 @@ wizterrainwish(struct _readobjnam_data *d)
                 lev->wall_info |= (old_wall_info & WM_MASK);
             /* set up trapped flag; open door states aren't eligible */
             if (d->trapped == 2 /* 2: wish includes explicit "untrapped" */
-                || (!secret && ((lev->doormask & (D_LOCKED | D_CLOSED)) == 0)))
+                || secret /* secret doors can't trapped due to their use
+                           * of both doormask and wall_info; those both
+                           * overlay rm->flags and partially conflict */
+                || (lev->doormask & (D_LOCKED | D_CLOSED)) == 0)
                 d->trapped = 0;
             if (d->trapped)
                 lev->doormask |= D_TRAPPED;
             /* feedback */
             dbuf[0] = '\0';
-            /* locked state and trapped flag can augment secret doors; other
-               states apply to normal doors only (see above about 'closed') */
             if (lev->doormask & D_TRAPPED)
                 Strcat(dbuf, "trapped ");
             if (lev->doormask & D_LOCKED)
@@ -3466,10 +3492,10 @@ wizterrainwish(struct _readobjnam_data *d)
             || IS_DOOR(oldtyp) || oldtyp == SDOOR) {
             /* when new terrain is a fountain, 'blessedftn' was explicitly
                set above; likewise for grave and 'disturbed'; when it's a
-               secret door, the old type was a wall or a door and we retain
-               the 'horizontal' value from those */
+               door, the old type was a wall or a door and we retain the
+               'horizontal' value from those */
             if (!IS_FOUNTAIN(lev->typ) && !IS_GRAVE(lev->typ)
-                && lev->typ != SDOOR)
+                && !IS_DOOR(lev->typ) && lev->typ != SDOOR)
                 lev->horizontal = 0; /* also clears blessedftn, disturbed */
         }
         /* note: lev->lit and lev->nondiggable retain their values even
@@ -3594,13 +3620,15 @@ readobjnam_preparse(struct _readobjnam_data *d)
             d->unlabeled = 1;
         } else if (!strncmpi(d->bp, "poisoned ", l = 9)) {
             d->ispoisoned = 1;
-            /* "trapped" recognized but not honored outside wizard mode */
+
+        /* "trapped" recognized but not honored outside wizard mode */
         } else if (!strncmpi(d->bp, "trapped ", l = 8)) {
             d->trapped = 0; /* undo any previous "untrapped" */
             if (wizard)
                 d->trapped = 1;
         } else if (!strncmpi(d->bp, "untrapped ", l = 10)) {
             d->trapped = 2; /* not trapped */
+
         /* locked, unlocked, broken: box/chest lock states, also door states;
            open, closed, doorless: additional door states */
         } else if (!strncmpi(d->bp, "locked ", l = 7)) {
@@ -4500,7 +4528,7 @@ readobjnam(char *bp, struct obj *no_wish)
      * Disallow such topology tweaks for WIZKIT startup wishes.
      */
  wiztrap:
-    if (wizard && !g.program_state.wizkit_wishing) {
+    if (wizard && !g.program_state.wizkit_wishing && !d.oclass) {
         /* [inline code moved to separate routine to unclutter readobjnam] */
         if ((d.otmp = wizterrainwish(&d)) != 0)
             return d.otmp;
@@ -4564,14 +4592,6 @@ readobjnam(char *bp, struct obj *no_wish)
     d.otmp = d.typ ? mksobj(d.typ, TRUE, FALSE) : mkobj(d.oclass, FALSE);
     d.typ = d.otmp->otyp, d.oclass = d.otmp->oclass; /* what we actually got */
 
-    if (d.islit && (d.typ == OIL_LAMP || d.typ == MAGIC_LAMP
-                    || d.typ == BRASS_LANTERN
-                    || Is_candle(d.otmp) || d.typ == POT_OIL)) {
-        place_object(d.otmp, u.ux, u.uy); /* make it viable light source */
-        begin_burn(d.otmp, FALSE);
-        obj_extract_self(d.otmp); /* now release it for caller's use */
-    }
-
     /* if player specified a reasonable count, maybe honor it;
        quantity for gold is handled elsewhere and d.cnt is 0 for it here */
     if (d.otmp->globby) {
@@ -4588,9 +4608,17 @@ readobjnam(char *bp, struct obj *no_wish)
         if (d.gsize > 1)
             d.otmp->owt += ((unsigned) (5 + (d.gsize - 2) * 10)
                             * d.otmp->owt);  /* 20 + {5|15|25} times 20 */
+        /* limit overall weight which limits shrink-away time which in turn
+           affects how long some of it will remain available to be eaten */
         if (d.cnt > 1) {
-            if ((d.cnt > 6 - d.gsize) && !wizard)
-                d.cnt = rn1(5, 2); /* 2..6 */
+            int rn1cnt = rn1(5, 2); /* 2..6 */
+
+            if (rn1cnt > 6 - d.gsize)
+                rn1cnt = 6 - d.gsize;
+            if (d.cnt > rn1cnt
+                && (!wizard || g.program_state.wizkit_wishing
+                    || yn("Override glob weight limit?") != 'y'))
+                d.cnt = rn1cnt;
             d.otmp->owt *= (unsigned) d.cnt;
         }
         /* note: the owt assignment below will not change glob's weight */
@@ -4608,6 +4636,14 @@ readobjnam(char *bp, struct obj *no_wish)
                         /* WEAPON_CLASS test excludes gems, gray stones */
                         || (d.oclass == WEAPON_CLASS && is_ammo(d.otmp))))))
             d.otmp->quan = (long) d.cnt;
+    }
+
+    if (d.islit && (d.typ == OIL_LAMP || d.typ == MAGIC_LAMP
+                    || d.typ == BRASS_LANTERN
+                    || Is_candle(d.otmp) || d.typ == POT_OIL)) {
+        place_object(d.otmp, u.ux, u.uy); /* make it viable light source */
+        begin_burn(d.otmp, FALSE);
+        obj_extract_self(d.otmp); /* now release it for caller's use */
     }
 
     if (d.spesgn == 0) {
@@ -4842,6 +4878,8 @@ readobjnam(char *bp, struct obj *no_wish)
         } else if (d.broken) {
             d.otmp->olocked = 0, d.otmp->obroken = 1;
         }
+        if (d.otmp->obroken)
+            d.otmp->otrapped = 0;
     }
 
     if (d.isgreased)

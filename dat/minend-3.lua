@@ -1,4 +1,4 @@
--- NetHack 3.7	mines.des	$NHDT-Date: 1432512783 2015/05/25 00:13:03 $  $NHDT-Branch: master $:$NHDT-Revision: 1.25 $
+-- NetHack mines minend-3.lua	$NHDT-Date: 1652196029 2022/05/10 15:20:29 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.2 $
 --	Copyright (c) 1989-95 by Jean-Christophe Collet
 --	Copyright (c) 1991-95 by M. Stephenson
 -- NetHack may be freely redistributed.  See license for details.
@@ -64,7 +64,7 @@ des.object("ruby")
 des.object("amethyst")
 des.object("*")
 des.object("amethyst")
-des.object({ id="golden egg", coord=place[2], buc="not-cursed", achievement=1 })
+des.object({ id="luckstone", coord=place[2], buc="not-cursed", achievement=1 })
 des.object("flint",place[1])
 des.object("?")
 des.object("?")

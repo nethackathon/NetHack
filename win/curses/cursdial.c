@@ -437,7 +437,7 @@ curses_ext_cmd(void)
 
         curs_set(1);
         wrefresh(extwin);
-        letter = getch();
+        letter = pgetchar(); /* pgetchar(cmd.c) implements do-again */
         curs_set(0);
         prompt_width = (int) strlen(cur_choice);
         matches = 0;
@@ -494,8 +494,15 @@ curses_ext_cmd(void)
     curses_destroy_win(extwin);
     if (extwin2)
         curses_destroy_win(extwin2);
-    if (ret == -1 && *cur_choice)
-        pline("%s: unknown extended command.", cur_choice);
+
+    if (ret != -1) {
+    } else {
+        char extcmd_char = extcmd_initiator();
+
+        if (*cur_choice)
+            pline("%s%s: unknown extended command.",
+                  visctrl(extcmd_char), cur_choice);
+    }
     return ret;
 }
 
@@ -747,14 +754,14 @@ curses_display_nhmenu(
     if (current_menu == NULL) {
         impossible(
                 "curses_display_nhmenu: attempt to display nonexistent menu");
-        return '\033';
+        return -1; /* not ESC which falsely claims 27 items were selected */
     }
 
     menu_item_ptr = current_menu->entries;
 
     if (menu_item_ptr == NULL) {
         impossible("curses_display_nhmenu: attempt to display empty menu");
-        return '\033';
+        return -1;
     }
 
     /* Reset items to unselected to clear out selections from previous
@@ -783,15 +790,14 @@ curses_display_nhmenu(
         selected = (MENU_ITEM_P *) alloc((unsigned)
                                          (num_chosen * sizeof (MENU_ITEM_P)));
         count = 0;
-
         menu_item_ptr = current_menu->entries;
 
         while (menu_item_ptr != NULL) {
             if (menu_item_ptr->selected) {
                 if (count == num_chosen) {
                     impossible("curses_display_nhmenu: Selected items "
-                          "exceeds expected number");
-                     break;
+                               "exceeds expected number");
+                    break;
                 }
                 selected[count].item = menu_item_ptr->identifier;
                 selected[count].count = menu_item_ptr->count;
@@ -803,6 +809,7 @@ curses_display_nhmenu(
         if (count != num_chosen) {
             impossible(
            "curses_display_nhmenu: Selected items less than expected number");
+            num_chosen = min(count, num_chosen);
         }
     }
 

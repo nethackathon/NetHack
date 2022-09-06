@@ -114,7 +114,7 @@ mk_mplayer_armor(struct monst* mon, short typ)
 }
 
 struct monst *
-mk_mplayer(struct permonst *ptr, xchar x, xchar y, boolean special)
+mk_mplayer(struct permonst *ptr, coordxy x, coordxy y, boolean special)
 {
     struct monst *mtmp;
     char nam[PL_NSIZ];
@@ -128,7 +128,7 @@ mk_mplayer(struct permonst *ptr, xchar x, xchar y, boolean special)
     if (!In_endgame(&u.uz))
         special = FALSE;
 
-    if ((mtmp = makemon(ptr, x, y, NO_MM_FLAGS)) != 0) {
+    if ((mtmp = makemon(ptr, x, y, special ? MM_NOMSG : NO_MM_FLAGS)) != 0) {
         short weapon, armor, cloak, helm, shield;
         int quan;
         struct obj *otmp;
@@ -266,7 +266,7 @@ mk_mplayer(struct permonst *ptr, xchar x, xchar y, boolean special)
                 && monmightthrowwep(otmp))
                 otmp->quan += (long) rn2(is_spear(otmp) ? 4 : 8);
             /* mplayers knew better than to overenchant Magicbane */
-            if (otmp->oartifact == ART_MAGICBANE)
+            if (is_art(otmp, ART_MAGICBANE))
                 otmp->spe = rnd(4);
             (void) mpickobj(mtmp, otmp);
         }
@@ -343,7 +343,7 @@ create_mplayers(register int num, boolean special)
         if (tryct > 50)
             return;
 
-        (void) mk_mplayer(&mons[pm], (xchar) x, (xchar) y, special);
+        (void) mk_mplayer(&mons[pm], (coordxy) x, (coordxy) y, special);
         num--;
     }
 }

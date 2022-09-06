@@ -1,4 +1,4 @@
-/* NetHack 3.7	lock.c	$NHDT-Date: 1602355548 2020/10/10 18:45:48 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.100 $ */
+/* NetHack 3.7	lock.c	$NHDT-Date: 1654464994 2022/06/05 21:36:34 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.114 $ */
 /* Copyright (c) Stichting Mathematisch Centrum, Amsterdam, 1985. */
 /*-Copyright (c) Robert Patrick Rankin, 2011. */
 /* NetHack may be freely redistributed.  See license for details. */
@@ -10,11 +10,11 @@ static int picklock(void);
 static int forcelock(void);
 
 static const char *lock_action(void);
-static boolean obstructed(int, int, boolean);
+static boolean obstructed(coordxy, coordxy, boolean);
 static void chest_shatter_msg(struct obj *);
 
 boolean
-picking_lock(int *x, int *y)
+picking_lock(coordxy *x, coordxy *y)
 {
     if (g.occupation == picklock) {
         *x = u.ux + u.dx;
@@ -27,7 +27,7 @@ picking_lock(int *x, int *y)
 }
 
 boolean
-picking_at(int x, int y)
+picking_at(coordxy x, coordxy y)
 {
     return (boolean) (g.occupation == picklock && g.xlock.door == &levl[x][y]);
 }
@@ -350,19 +350,25 @@ DISABLE_WARNING_FORMAT_NONLITERAL
 
 /* player is applying a key, lock pick, or credit card */
 int
-pick_lock(struct obj *pick,
-          xchar rx, xchar ry, /* coordinates of doors/container,
-                                 for autounlock: does not prompt
-                                 for direction if these are set */
-          struct obj *container) /* container, for autounlock */
+pick_lock(
+    struct obj *pick,
+    coordxy rx, coordxy ry, /* coordinates of door/container, for autounlock:
+                         * does not prompt for direction if these are set */
+    struct obj *container) /* container, for autounlock */
 {
+    struct obj dummypick;
     int picktyp, c, ch;
     coord cc;
     struct rm *door;
     struct obj *otmp;
     char qbuf[QBUFSZ];
-    boolean autounlock = (rx != 0 && ry != 0) || (container != NULL);
+    boolean autounlock = (rx != 0 || container != NULL);
 
+    /* 'pick' might be Null [called by do_loot_cont() for AUTOUNLOCK_UNTRAP] */
+    if (!pick) {
+        dummypick = cg.zeroobj;
+        pick = &dummypick; /* pick->otyp will be STRANGE_OBJECT */
+    }
     picktyp = pick->otyp;
 
     /* check whether we're resuming an interrupted previous attempt */
@@ -400,15 +406,14 @@ pick_lock(struct obj *pick,
         return PICKLOCK_DID_NOTHING;
     }
 
-    if (picktyp != LOCK_PICK
-        && picktyp != CREDIT_CARD
-        && picktyp != SKELETON_KEY) {
+    if (pick != &dummypick && picktyp != SKELETON_KEY
+        && picktyp != LOCK_PICK && picktyp != CREDIT_CARD) {
         impossible("picking lock with object %d?", picktyp);
         return PICKLOCK_DID_NOTHING;
     }
     ch = 0; /* lint suppression */
 
-    if (rx != 0 && ry != 0) { /* autounlock; caller has provided coordinates */
+    if (rx != 0) { /* autounlock; caller has provided coordinates */
         cc.x = rx;
         cc.y = ry;
     } else if (!get_adjacent_loc((char *) 0, "Invalid location!",
@@ -422,7 +427,7 @@ pick_lock(struct obj *pick,
         boolean it;
         int count;
 
-        if (u.dz < 0) {
+        if (u.dz < 0 && !autounlock) { /* beware stale u.dz value */
             There("isn't any sort of lock up %s.",
                   Levitation ? "here" : "there");
             return PICKLOCK_LEARNED_SOMETHING;
@@ -436,10 +441,12 @@ pick_lock(struct obj *pick,
 
         count = 0;
         c = 'n'; /* in case there are no boxes here */
-        for (otmp = g.level.objects[cc.x][cc.y]; otmp; otmp = otmp->nexthere)
-            /* autounlock on boxes: only the one that just informed you it was
-             * locked. Don't include any other boxes which might be here. */
-            if ((!autounlock && Is_box(otmp)) || (otmp == container)) {
+        for (otmp = g.level.objects[cc.x][cc.y]; otmp; otmp = otmp->nexthere) {
+            /* autounlock on boxes: only the one that was just discovered to
+               be locked; don't include any other boxes which might be here */
+            if (autounlock && otmp != container)
+                continue;
+            if (Is_box(otmp)) {
                 ++count;
                 if (!can_reach_floor(TRUE)) {
                     You_cant("reach %s from up here.", the(xname(otmp)));
@@ -455,11 +462,25 @@ pick_lock(struct obj *pick,
                 else
                     verb = "pick";
 
-                if (autounlock) {
-                    Sprintf(qbuf, "Unlock it with %s?", yname(pick));
-                    c = yn(qbuf);
-                    if (c == 'n')
-                        return 0;
+                if (autounlock && (flags.autounlock & AUTOUNLOCK_UNTRAP) != 0
+                    && could_untrap(FALSE, TRUE)
+                    && (c = ynq(safe_qbuf(qbuf, "Check ", " for a trap?",
+                                          otmp, yname, ysimple_name, "this")))
+                       != 'n') {
+                    if (c == 'q')
+                        return PICKLOCK_DID_NOTHING; /* c == 'q' */
+                    /* c == 'y' */
+                    untrap(FALSE, 0, 0, otmp);
+                    return PICKLOCK_DID_SOMETHING; /* even if no trap found */
+                } else if (autounlock
+                          && (flags.autounlock & AUTOUNLOCK_APPLY_KEY) != 0) {
+                    c = 'q';
+                    if (pick != &dummypick) {
+                        Sprintf(qbuf, "Unlock it with %s?", yname(pick));
+                        c = ynq(qbuf);
+                    }
+                    if (c != 'y')
+                        return PICKLOCK_DID_NOTHING;
                 } else {
                     /* "There is <a box> here; <verb> <it|its lock>?" */
                     Sprintf(qsfx, " here; %s %s?",
@@ -470,9 +491,9 @@ pick_lock(struct obj *pick,
 
                     c = ynq(qbuf);
                     if (c == 'q')
-                        return 0;
+                        return PICKLOCK_DID_NOTHING;
                     if (c == 'n')
-                        continue;
+                        continue; /* try next box */
                 }
 
                 if (otmp->obroken) {
@@ -508,6 +529,7 @@ pick_lock(struct obj *pick,
                 g.xlock.door = 0;
                 break;
             }
+        }
         if (c != 'y') {
             if (!count)
                 There("doesn't seem to be any sort of lock here.");
@@ -557,6 +579,15 @@ pick_lock(struct obj *pick,
             pline("This door is broken.");
             return PICKLOCK_LEARNED_SOMETHING;
         default:
+            if ((flags.autounlock & AUTOUNLOCK_UNTRAP) != 0
+                && could_untrap(FALSE, FALSE)
+                && (c = ynq("Check this door for a trap?")) != 'n') {
+                if (c == 'q')
+                    return PICKLOCK_DID_NOTHING;
+                /* c == 'y' */
+                untrap(FALSE, cc.x, cc.y, (struct obj *) 0);
+                return PICKLOCK_DID_SOMETHING; /* even if no trap found */
+            }
             /* credit cards are only good for unlocking */
             if (picktyp == CREDIT_CARD && !(door->doormask & D_LOCKED)) {
                 You_cant("lock a door with a credit card.");
@@ -567,10 +598,9 @@ pick_lock(struct obj *pick,
                     (door->doormask & D_LOCKED) ? "Unlock" : "Lock",
                     autounlock ? " with " : "",
                     autounlock ? yname(pick) : "");
-
-            c = yn(qbuf);
-            if (c == 'n')
-                return 0;
+            c = ynq(qbuf);
+            if (c != 'y')
+                return PICKLOCK_DID_NOTHING;
 
             /* note: for !autounlock, 'apply' already did touch check */
             if (autounlock && !touch_artifact(pick, &g.youmonst))
@@ -625,6 +655,11 @@ doforce(void)
     register struct obj *otmp;
     register int c, picktyp;
     char qbuf[QBUFSZ];
+
+    /*
+     * TODO?
+     *  allow force with edged weapon to be performed on doors.
+     */
 
     if (u.uswallow) {
         You_cant("force anything from inside here.");
@@ -695,7 +730,7 @@ doforce(void)
 }
 
 boolean
-stumble_on_door_mimic(int x, int y)
+stumble_on_door_mimic(coordxy x, coordxy y)
 {
     struct monst *mtmp;
 
@@ -716,11 +751,12 @@ doopen(void)
 
 /* try to open a door in direction u.dx/u.dy */
 int
-doopen_indir(int x, int y)
+doopen_indir(coordxy x, coordxy y)
 {
     coord cc;
     register struct rm *door;
     boolean portcullis;
+    const char *dirprompt;
     int res = ECMD_OK;
 
     if (nohands(g.youmonst.data)) {
@@ -728,20 +764,31 @@ doopen_indir(int x, int y)
         return ECMD_OK;
     }
 
-    if (u.utrap && u.utraptype == TT_PIT) {
-        You_cant("reach over the edge of the pit.");
-        return ECMD_OK;
-    }
+    dirprompt = NULL; /* have get_adjacent_loc() -> getdir() use default */
+    if (u.utrap && u.utraptype == TT_PIT && container_at(u.ux, u.uy, FALSE))
+        dirprompt = "Open where? [.>]";
 
-    if (x > 0 && y > 0) {
+    if (x > 0 && y >= 0) {
+        /* nonzero <x,y> is used when hero in amorphous form tries to
+           flow under a closed door at <x,y>; the test here was using
+           'y > 0' but that would give incorrect results if doors are
+           ever allowed to be placed on the top row of the map */
         cc.x = x;
         cc.y = y;
-    } else if (!get_adjacent_loc((char *) 0, (char *) 0, u.ux, u.uy, &cc))
+    } else if (!get_adjacent_loc(dirprompt, (char *) 0, u.ux, u.uy, &cc)) {
         return ECMD_OK;
+    }
 
     /* open at yourself/up/down */
     if (u_at(cc.x, cc.y))
         return doloot();
+
+    /* this used to be done prior to get_adjacent_loc() but doing so was
+       incorrect once open at hero's spot became an alternate way to loot */
+    if (u.utrap && u.utraptype == TT_PIT) {
+        You_cant("reach over the edge of the pit.");
+        return ECMD_OK;
+    }
 
     if (stumble_on_door_mimic(cc.x, cc.y))
         return ECMD_TIME;
@@ -780,7 +827,6 @@ doopen_indir(int x, int y)
     if (!(door->doormask & D_CLOSED)) {
         const char *mesg;
         boolean locked = FALSE;
-        struct obj* unlocktool;
 
         switch (door->doormask) {
         case D_BROKEN:
@@ -798,8 +844,21 @@ doopen_indir(int x, int y)
             break;
         }
         pline("This door%s.", mesg);
-        if (locked && flags.autounlock && (unlocktool = autokey(TRUE)) != 0) {
-            res = pick_lock(unlocktool, cc.x, cc.y, (struct obj *) 0) ? ECMD_TIME : ECMD_OK;
+        if (locked && flags.autounlock) {
+            struct obj *unlocktool;
+
+            u.dz = 0; /* should already be 0 since hero moved toward door */
+            if ((flags.autounlock & AUTOUNLOCK_APPLY_KEY) != 0
+                && (unlocktool = autokey(TRUE)) != 0) {
+                res = pick_lock(unlocktool, cc.x, cc.y,
+                                (struct obj *) 0) ? ECMD_TIME : ECMD_OK;
+            } else if (!u.usteed
+                       && (flags.autounlock & AUTOUNLOCK_KICK) != 0
+                       && ynq("Kick it?") == 'y') {
+                cmdq_add_ec(CQ_CANNED, dokick);
+                cmdq_add_dir(CQ_CANNED, sgn(cc.x - u.ux), sgn(cc.y - u.uy), 0);
+                res = ECMD_TIME;
+            }
         }
         return res;
     }
@@ -830,23 +889,21 @@ doopen_indir(int x, int y)
 }
 
 static boolean
-obstructed(register int x, register int y, boolean quietly)
+obstructed(coordxy x, coordxy y, boolean quietly)
 {
-    register struct monst *mtmp = m_at(x, y);
+    struct monst *mtmp = m_at(x, y);
 
     if (mtmp && M_AP_TYPE(mtmp) != M_AP_FURNITURE) {
         if (M_AP_TYPE(mtmp) == M_AP_OBJECT)
             goto objhere;
         if (!quietly) {
-            if ((mtmp->mx != x) || (mtmp->my != y)) {
-                /* worm tail */
-                pline("%s%s blocks the way!",
-                      !canspotmon(mtmp) ? Something : s_suffix(Monnam(mtmp)),
-                      !canspotmon(mtmp) ? "" : " tail");
-            } else {
-                pline("%s blocks the way!",
-                      !canspotmon(mtmp) ? "Some creature" : Monnam(mtmp));
-            }
+            char *Mn = Some_Monnam(mtmp); /* Monnam, Someone or Something */
+
+            if ((mtmp->mx != x || mtmp->my != y) && canspotmon(mtmp))
+                /* s_suffix() returns a modifiable buffer */
+                Mn = strcat(s_suffix(Mn), " tail");
+
+            pline("%s blocks the way!", Mn);
         }
         if (!canspotmon(mtmp))
             map_invisible(x, y);
@@ -865,7 +922,7 @@ obstructed(register int x, register int y, boolean quietly)
 int
 doclose(void)
 {
-    register int x, y;
+    register coordxy x, y;
     register struct rm *door;
     boolean portcullis;
     int res = ECMD_OK;
@@ -1006,7 +1063,7 @@ boxlock(struct obj *obj, struct obj *otmp) /* obj *is* a box */
 /* Door/secret door was hit with spell or wand effect otmp;
    returns true if something happened */
 boolean
-doorlock(struct obj *otmp, int x, int y)
+doorlock(struct obj *otmp, coordxy x, coordxy y)
 {
     register struct rm *door = &levl[x][y];
     boolean res = TRUE;
@@ -1121,7 +1178,7 @@ doorlock(struct obj *otmp, int x, int y)
                 } else {
                     /* for mtmp, mb_trapped() does is own wake_nearto() */
                     loudness = 40;
-                    if (flags.verbose) {
+                    if (Verbose(1, doorlock1)) {
                         if ((sawit || seeit) && !Unaware)
                             pline("KABOOM!!  You see a door explode.");
                         else if (!Deaf)
@@ -1137,7 +1194,7 @@ doorlock(struct obj *otmp, int x, int y)
             unblock_point(x, y);
             seeit = cansee(x, y);
             newsym(x, y);
-            if (flags.verbose) {
+            if (Verbose(1, doorlock2)) {
                 if ((sawit || seeit) && !Unaware)
                     pline_The("door crashes open!");
                 else if (!Deaf)

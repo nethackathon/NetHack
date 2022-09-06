@@ -1,4 +1,4 @@
-/* NetHack 3.7	flag.h	$NHDT-Date: 1600933440 2020/09/24 07:44:00 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.185 $ */
+/* NetHack 3.7	flag.h	$NHDT-Date: 1655161560 2022/06/13 23:06:00 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.201 $ */
 /* Copyright (c) Stichting Mathematisch Centrum, Amsterdam, 1985. */
 /*-Copyright (c) Michael Allison, 2006. */
 /* NetHack may be freely redistributed.  See license for details. */
@@ -20,7 +20,6 @@ struct flag {
     boolean autodig;         /* MRKR: Automatically dig */
     boolean autoquiver;      /* Automatically fill quiver */
     boolean autoopen;        /* open doors by walking into them */
-    boolean autounlock;      /* automatically apply unlocking tools */
     boolean beginner;        /* True early in each game; affects feedback */
     boolean biff;            /* enable checking for mail */
     boolean bones;           /* allow saving/loading bones */
@@ -63,6 +62,11 @@ struct flag {
     boolean tombstone;       /* print tombstone */
     boolean verbose;         /* max battle info */
     int end_top, end_around; /* describe desired score list */
+    unsigned autounlock;     /* locked door/chest action */
+#define AUTOUNLOCK_UNTRAP    1
+#define AUTOUNLOCK_APPLY_KEY 2
+#define AUTOUNLOCK_KICK      4
+#define AUTOUNLOCK_FORCE     8
     unsigned moonphase;
     unsigned long suppress_alert;
 #define NEW_MOON 0
@@ -208,10 +212,14 @@ struct instance_flags {
 #define TER_OBJ    0x04
 #define TER_MON    0x08
 #define TER_DETECT 0x10    /* detect_foo magic rather than #terrain */
-    boolean getloc_travelmode;
+    int getdir_click;      /* as input to getdir(): non-zero, accept simulated
+                            * click that's not adjacent to or on hero;
+                            * as output from getdir(): simulated button used
+                            * 0 (none) or CLICK_1 (left) or CLICK_2 (right) */
     int getloc_filter;     /* GFILTER_foo */
-    boolean getloc_usemenu;
     boolean getloc_moveskip;
+    boolean getloc_travelmode;
+    boolean getloc_usemenu;
     coord travelcc;        /* coordinates for travel_cache */
     boolean trav_debug;    /* display travel path (#if DEBUG only) */
     boolean window_inited; /* true if init_nhwindows() completed */
@@ -233,6 +241,8 @@ struct instance_flags {
     int menuinvertmode;  /* 0 = invert toggles every item;
                             1 = invert skips 'all items' item */
     int menu_headings;    /* ATR for menu headings */
+    uint32_t colorcount;    /* store how many colors terminal is capable of */
+    boolean use_truecolor;  /* force use of truecolor */
 #ifdef ALTMETA
     boolean altmeta;      /* Alt-c sends ESC c rather than M-c */
 #endif
@@ -308,7 +318,6 @@ struct instance_flags {
 #ifdef TTY_SOUND_ESCCODES
     boolean vt_sounddata;    /* output console codes for sound support in TTY*/
 #endif
-    boolean clicklook;       /* allow right-clicking for look */
     boolean cmdassist;       /* provide detailed assistance for some comnds */
     boolean fireassist;      /* autowield launcher when using fire-command */
     boolean time_botl;       /* context.botl for 'time' (moves) only */
@@ -385,7 +394,7 @@ struct instance_flags {
     Bitfield(save_uinwater, 1);
     Bitfield(save_uburied, 1);
     struct debug_flags debug;
-    boolean windowtype_locked;  /* windowtype can't change from configfile */
+    boolean windowtype_locked;   /* windowtype can't change from configfile */
     boolean windowtype_deferred; /* pick a windowport and store it in
                                     chosen_windowport[], but do not switch to
                                     it in the midst of options processing */

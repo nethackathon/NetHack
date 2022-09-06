@@ -42,7 +42,8 @@ static int throwspell(void);
 static void cast_protection(void);
 static void spell_backfire(int);
 static const char *spelltypemnemonic(int);
-static boolean spell_aim_step(genericptr_t, int, int);
+static boolean can_center_spell_location(coordxy, coordxy);
+static boolean spell_aim_step(genericptr_t, coordxy, coordxy);
 
 /* The roles[] table lists the role-specific values for tuning
  * percent_success().
@@ -714,7 +715,7 @@ getspell(int* spell_no)
         for (;;) {
             Snprintf(qbuf, sizeof(qbuf), "Cast which spell? [%s *?]",
                      lets);
-            ilet = yn_function(qbuf, (char *) 0, '\0');
+            ilet = yn_function(qbuf, (char *) 0, '\0', TRUE);
             if (ilet == '*' || ilet == '?')
                 break; /* use menu mode */
             if (index(quitchars, ilet))
@@ -821,24 +822,20 @@ cast_protection(void)
             if (u.uspellprot) {
                 pline_The("%s haze around you becomes more dense.", hgolden);
             } else {
+                struct permonst *pm = u.ustuck ? u.ustuck->data : 0;
+
                 rmtyp = levl[u.ux][u.uy].typ;
                 atmosphere = u.uswallow
-                                ? ((u.ustuck->data == &mons[PM_FOG_CLOUD])
-                                   ? "mist"
-                                   : is_whirly(u.ustuck->data)
-                                      ? "maelstrom"
-                                      : is_animal(u.ustuck->data)
-                                         ? "maw"
+                                ? ((pm == &mons[PM_FOG_CLOUD]) ? "mist"
+                                   : is_whirly(u.ustuck->data) ? "maelstrom"
+                                     : enfolds(pm) ? "folds"
+                                       : is_animal(u.ustuck->data) ? "maw"
                                          : "ooze")
-                                : (u.uinwater
-                                   ? hliquid("water")
-                                   : (rmtyp == CLOUD)
-                                      ? "cloud"
-                                      : IS_TREE(rmtyp)
-                                         ? "vegetation"
-                                         : IS_STWALL(rmtyp)
-                                            ? "stone"
-                                            : "air");
+                                : (u.uinwater ? hliquid("water")
+                                   : (rmtyp == CLOUD) ? "cloud"
+                                     : IS_TREE(rmtyp) ? "vegetation"
+                                       : IS_STWALL(rmtyp) ? "stone"
+                                         : "air");
                 pline_The("%s around you begins to shimmer with %s haze.",
                           atmosphere, an(hgolden));
             }
@@ -1246,7 +1243,7 @@ spelleffects(int spell_otyp, boolean atme)
 
 /*ARGSUSED*/
 static boolean
-spell_aim_step(genericptr_t arg UNUSED, int x, int y)
+spell_aim_step(genericptr_t arg UNUSED, coordxy x, coordxy y)
 {
     if (!isok(x,y))
         return FALSE;
@@ -1254,6 +1251,15 @@ spell_aim_step(genericptr_t arg UNUSED, int x, int y)
         && !(IS_DOOR(levl[x][y].typ) && (levl[x][y].doormask & D_ISOPEN)))
         return FALSE;
     return TRUE;
+}
+
+/* not quite the same as throwspell limits, but close enough */
+static boolean
+can_center_spell_location(coordxy x, coordxy y)
+{
+    if (distmin(u.ux, u.uy, x, y) > 10)
+        return FALSE;
+    return (isok(x, y) && cansee(x, y) && !(IS_STWALL(levl[x][y].typ)));
 }
 
 /* Choose location where spell takes effect. */
@@ -1274,6 +1280,7 @@ throwspell(void)
     pline("Where do you want to cast the spell?");
     cc.x = u.ux;
     cc.y = u.uy;
+    getpos_sethilite(NULL, can_center_spell_location);
     if (getpos(&cc, TRUE, "the desired position") < 0)
         return 0; /* user pressed ESC */
     clear_nhwindow(WIN_MESSAGE); /* discard any autodescribe feedback */
@@ -1583,6 +1590,7 @@ spellsortmenu(void)
     anything any;
     char let;
     int i, n, choice;
+    int clr = 0;
 
     tmpwin = create_nhwindow(NHW_MENU);
     start_menu(tmpwin, MENU_BEHAVE_STANDARD);
@@ -1594,13 +1602,13 @@ spellsortmenu(void)
             /* separate final choice from others with a blank line */
             any.a_int = 0;
             add_menu(tmpwin, &nul_glyphinfo, &any, 0, 0,
-                     ATR_NONE, "", MENU_ITEMFLAGS_NONE);
+                     ATR_NONE, clr, "", MENU_ITEMFLAGS_NONE);
         } else {
             let = 'a' + i;
         }
         any.a_int = i + 1;
         add_menu(tmpwin, &nul_glyphinfo, &any, let, 0,
-                 ATR_NONE, spl_sortchoices[i],
+                 ATR_NONE, clr, spl_sortchoices[i],
                  (i == g.spl_sortmode) ? MENU_ITEMFLAGS_SELECTED : MENU_ITEMFLAGS_NONE);
     }
     end_menu(tmpwin, "View known spells list sorted");
@@ -1672,6 +1680,7 @@ dospellmenu(
     const char *fmt;
     menu_item *selected;
     anything any;
+    int clr = 0;
 
     tmpwin = create_nhwindow(NHW_MENU);
     start_menu(tmpwin, MENU_BEHAVE_STANDARD);
@@ -1698,7 +1707,7 @@ dospellmenu(
         Sprintf(eos(buf), "%c%6s", sep, "turns");
 
     add_menu(tmpwin, &nul_glyphinfo, &any, 0, 0,
-             iflags.menu_headings, buf, MENU_ITEMFLAGS_NONE);
+             iflags.menu_headings, clr, buf, MENU_ITEMFLAGS_NONE);
     for (i = 0; i < MAXSPELL && spellid(i) != NO_SPELL; i++) {
         splnum = !g.spl_orderindx ? i : g.spl_orderindx[i];
         Sprintf(buf, fmt, spellname(splnum), spellev(splnum),
@@ -1710,7 +1719,7 @@ dospellmenu(
 
         any.a_int = splnum + 1; /* must be non-zero */
         add_menu(tmpwin, &nul_glyphinfo, &any, spellet(splnum), 0,
-                 ATR_NONE, buf,
+                 ATR_NONE, clr, buf,
                  (splnum == splaction)
                     ? MENU_ITEMFLAGS_SELECTED : MENU_ITEMFLAGS_NONE);
     }
@@ -1723,7 +1732,7 @@ dospellmenu(
             /* more than 1 spell, add an extra menu entry */
             any.a_int = SPELLMENU_SORT + 1;
             add_menu(tmpwin, &nul_glyphinfo, &any, '+', 0,
-                     ATR_NONE, "[sort spells]", MENU_ITEMFLAGS_NONE);
+                     ATR_NONE, clr, "[sort spells]", MENU_ITEMFLAGS_NONE);
         }
     }
     end_menu(tmpwin, prompt);

@@ -1,4 +1,4 @@
--- NetHack 3.7	Valkyrie.des	$NHDT-Date: 1553807172 2019/03/28 21:06:12 $  $NHDT-Branch: NetHack-3.6.2-beta01 $:$NHDT-Revision: 1.15 $
+-- NetHack Valkyrie Val-strt.lua	$NHDT-Date: 1652196017 2022/05/10 15:20:17 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.2 $
 --	Copyright (c) 1989 by Jean-Christophe Collet
 --	Copyright (c) 1991-2 by M. Stephenson
 -- NetHack may be freely redistributed.  See license for details.
@@ -51,7 +51,6 @@ xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ]]);
 -- Dungeon Description
 des.region(selection.area(00,00,75,19), "lit")
-des.region(selection.area(27,08,42,12), "lit")
 -- Portal arrival point
 des.levregion({ region = {66,17,66,17}, type="branch" })
 -- Stairs

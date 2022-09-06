@@ -180,8 +180,8 @@
         M1_ANIMAL | M1_NOHANDS | M1_OMNIVORE | M1_OVIPAROUS, M2_HOSTILE,
         M3_INFRAVISIBLE, 8, CLR_YELLOW, COCKATRICE),
     MON("pyrolisk", S_COCKATRICE, LVL(6, 6, 6, 30, 0), (G_GENO | 1),
-        A(ATTK(AT_GAZE, AD_FIRE, 2, 6), NO_ATTK, NO_ATTK, NO_ATTK, NO_ATTK,
-          NO_ATTK),
+        A(ATTK(AT_GAZE, AD_FIRE, 2, 6), ATTK(AT_BITE, AD_PHYS, 1, 6),
+          NO_ATTK, NO_ATTK, NO_ATTK, NO_ATTK),
         SIZ(30, 30, MS_HISS, MZ_SMALL), MR_POISON | MR_FIRE,
         MR_POISON | MR_FIRE,
         M1_ANIMAL | M1_NOHANDS | M1_OMNIVORE | M1_OVIPAROUS, M2_HOSTILE,
@@ -821,17 +821,22 @@
         M2_HOSTILE, 0, 8, CLR_RED, SCORPION),
     /*
      * trappers, lurkers, &c
+     * Note:  prior to 3.7, these were defined to do AD_DGST damage,
+     * but they don't swallow their victims into their stomachs and
+     * digest, they enfold and crush or suffocate.
+     * The Monster Manual states that someone engulfed by a trapper
+     * can't use weapons but we do not enforce that.
      */
     MON("lurker above", S_TRAPPER, LVL(10, 3, 3, 0, 0), (G_GENO | 2),
-        A(ATTK(AT_ENGL, AD_DGST, 1, 8), NO_ATTK, NO_ATTK, NO_ATTK, NO_ATTK,
-          NO_ATTK),
+        A(ATTK(AT_ENGL, AD_WRAP, 1, 6), ATTK(AT_ENGL, AD_PHYS, 2, 6),
+          NO_ATTK, NO_ATTK, NO_ATTK, NO_ATTK),
         SIZ(800, 350, MS_SILENT, MZ_HUGE), 0, 0,
         M1_HIDE | M1_FLY | M1_ANIMAL | M1_NOEYES | M1_NOLIMBS | M1_NOHEAD
             | M1_CARNIVORE,
         M2_HOSTILE | M2_STALK | M2_STRONG, 0, 12, CLR_GRAY, LURKER_ABOVE),
     MON("trapper", S_TRAPPER, LVL(12, 3, 3, 0, 0), (G_GENO | 2),
-        A(ATTK(AT_ENGL, AD_DGST, 1, 10), NO_ATTK, NO_ATTK, NO_ATTK, NO_ATTK,
-          NO_ATTK),
+        A(ATTK(AT_ENGL, AD_WRAP, 1, 8), ATTK(AT_ENGL, AD_PHYS, 2, 8),
+          NO_ATTK, NO_ATTK, NO_ATTK, NO_ATTK),
         SIZ(800, 350, MS_SILENT, MZ_HUGE), 0, 0,
         M1_HIDE | M1_ANIMAL | M1_NOEYES | M1_NOLIMBS | M1_NOHEAD
             | M1_CARNIVORE,
@@ -882,15 +887,16 @@
      * vortices
      */
     MON("fog cloud", S_VORTEX, LVL(3, 1, 0, 0, 0), (G_GENO | G_NOCORPSE | 2),
-        A(ATTK(AT_ENGL, AD_PHYS, 1, 6), NO_ATTK, NO_ATTK, NO_ATTK, NO_ATTK,
-          NO_ATTK),
+        A(ATTK(AT_ENGL, AD_PHYS, 1, 6),
+          NO_ATTK, NO_ATTK, NO_ATTK, NO_ATTK, NO_ATTK),
         SIZ(0, 0, MS_SILENT, MZ_HUGE), MR_SLEEP | MR_POISON | MR_STONE, 0,
         M1_FLY | M1_BREATHLESS | M1_NOEYES | M1_NOLIMBS | M1_NOHEAD
             | M1_MINDLESS | M1_AMORPHOUS | M1_UNSOLID,
         M2_HOSTILE | M2_NEUTER, 0, 4, CLR_GRAY, FOG_CLOUD),
     MON("dust vortex", S_VORTEX, LVL(4, 20, 2, 30, 0),
-        (G_GENO | G_NOCORPSE | 2), A(ATTK(AT_ENGL, AD_BLND, 2, 8), NO_ATTK,
-                                     NO_ATTK, NO_ATTK, NO_ATTK, NO_ATTK),
+        (G_GENO | G_NOCORPSE | 2),
+        A(ATTK(AT_ENGL, AD_BLND, 2, 8),
+          NO_ATTK, NO_ATTK, NO_ATTK, NO_ATTK, NO_ATTK),
         SIZ(0, 0, MS_SILENT, MZ_HUGE), MR_SLEEP | MR_POISON | MR_STONE, 0,
         M1_FLY | M1_BREATHLESS | M1_NOEYES | M1_NOLIMBS | M1_NOHEAD
             | M1_MINDLESS,
@@ -967,7 +973,8 @@
         (G_GENO | G_SGROUP | G_NOCORPSE | 3),
         A(ATTK(AT_BITE, AD_ELEC, 1, 1), NO_ATTK, NO_ATTK, NO_ATTK, NO_ATTK,
           NO_ATTK),
-        SIZ(15, 10, MS_BUZZ, MZ_TINY), MR_ELEC | MR_POISON, 0, M1_ANIMAL,
+        SIZ(15, 10, MS_BUZZ, MZ_TINY), MR_ELEC | MR_POISON, 0,
+        M1_ANIMAL | M1_NOHANDS,
         M2_HOSTILE, M3_INFRAVISIBLE, 1, CLR_MAGENTA, GRID_BUG),
     MON("xan", S_XAN, LVL(7, 18, -4, 0, 0), (G_GENO | 3),
         A(ATTK(AT_STNG, AD_LEGS, 1, 4), NO_ATTK, NO_ATTK, NO_ATTK, NO_ATTK,
@@ -1943,12 +1950,12 @@
           | M2_MALE | M2_MAGIC | M2_SHAPESHIFTER,
         M3_INFRAVISIBLE, 26, HI_ZAP, VAMPIRE_MAGE),
 #endif
-    MON("Bunnicula", S_VAMPIRE, LVL(28, 26, -6, 80, -10),
+    MON("Vlad the Impaler", S_VAMPIRE, LVL(28, 26, -6, 80, -10),
         (G_NOGEN | G_NOCORPSE | G_UNIQ),
-        A(ATTK(AT_KICK, AD_PHYS, 3, 10), ATTK(AT_BITE, AD_DRLI, 1, 12),
+        A(ATTK(AT_WEAP, AD_PHYS, 2, 10), ATTK(AT_BITE, AD_DRLI, 1, 12),
           NO_ATTK, NO_ATTK, NO_ATTK, NO_ATTK),
         SIZ(WT_HUMAN, 400, MS_VAMPIRE, MZ_HUMAN), MR_SLEEP | MR_POISON, 0,
-        M1_FLY | M1_BREATHLESS | M1_HUMANOID | M1_POIS | M1_REGEN | M1_HERBIVORE,
+        M1_FLY | M1_BREATHLESS | M1_HUMANOID | M1_POIS | M1_REGEN,
         M2_NOPOLY | M2_UNDEAD | M2_STALK | M2_HOSTILE | M2_PNAME | M2_STRONG
             | M2_NASTY | M2_PRINCE | M2_MALE | M2_SHAPESHIFTER,
         M3_WAITFORU | M3_WANTSCAND | M3_INFRAVISIBLE, 32, HI_LORD,
@@ -2247,7 +2254,7 @@
         SIZ(WT_ELF, 350, MS_HUMANOID, MZ_HUMAN), MR_SLEEP, MR_SLEEP,
         M1_HUMANOID | M1_OMNIVORE | M1_SEE_INVIS, M2_ELF | M2_COLLECT,
         M3_INFRAVISIBLE | M3_INFRAVISION, 8, CLR_GRAY, GREY_ELF),
-    MON3("elf-lord", "elf-queen", "elf-noble",
+    MON3("elf-lord", "elf-lady", "elf-noble",
         S_HUMAN, LVL(8, 12, 10, 20, -9), (G_GENO | G_SGROUP | 2),
         A(ATTK(AT_WEAP, AD_PHYS, 2, 4), ATTK(AT_WEAP, AD_PHYS, 2, 4),
           NO_ATTK, NO_ATTK, NO_ATTK, NO_ATTK),

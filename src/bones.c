@@ -1,4 +1,4 @@
-/* NetHack 3.7	bones.c	$NHDT-Date: 1596498151 2020/08/03 23:42:31 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.103 $ */
+/* NetHack 3.7	bones.c	$NHDT-Date: 1654931350 2022/06/11 07:09:10 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.119 $ */
 /* Copyright (c) Stichting Mathematisch Centrum, Amsterdam, 1985,1993. */
 /*-Copyright (c) Robert Patrick Rankin, 2012. */
 /* NetHack may be freely redistributed.  See license for details. */
@@ -8,8 +8,9 @@
 static boolean no_bones_level(d_level *);
 static void goodfruit(int);
 static void resetobjs(struct obj *, boolean);
-static void give_to_nearby_mon(struct obj *, int, int);
+static void give_to_nearby_mon(struct obj *, coordxy, coordxy);
 static boolean fixuporacle(struct monst *);
+static void remove_mon_from_bones(struct monst *);
 
 static boolean
 no_bones_level(d_level *lev)
@@ -81,7 +82,7 @@ resetobjs(struct obj *ochain, boolean restore)
             if (otmp->oclass == FOOD_CLASS && otmp->oeaten) {
                 struct obj *top;
                 char *p;
-                xchar ox, oy;
+                coordxy ox, oy;
 
                 for (top = otmp; top->where == OBJ_CONTAINED;
                      top = top->ocontainer)
@@ -194,7 +195,7 @@ void
 sanitize_name(char *namebuf)
 {
     int c;
-    boolean strip_8th_bit = (WINDOWPORT("tty")
+    boolean strip_8th_bit = (WINDOWPORT(tty)
                              && !iflags.wc_eight_bit_input);
 
     /* it's tempting to skip this for single-user platforms, since
@@ -219,7 +220,7 @@ sanitize_name(char *namebuf)
    but skipping hero's location.
    If no such monster, place object on floor at x,y. */
 static void
-give_to_nearby_mon(struct obj *otmp, int x, int y)
+give_to_nearby_mon(struct obj *otmp, coordxy x, coordxy y)
 {
     struct monst *mtmp;
     struct monst *selected = (struct monst *) 0;
@@ -252,18 +253,21 @@ give_to_nearby_mon(struct obj *otmp, int x, int y)
 
 /* called by savebones(); also by finish_paybill(shk.c) */
 void
-drop_upon_death(struct monst *mtmp, /* monster if hero turned into one (other than ghost) */
-                struct obj *cont,   /* container if hero is turned into a statue */
-                int x, int y)
+drop_upon_death(
+    struct monst *mtmp, /* monster if hero rises as one (non ghost) */
+    struct obj *cont,   /* container if hero is turned into a statue */
+    coordxy x, coordxy y)
 {
     struct obj *otmp;
 
-    /* when dual-wielding, the second weapon gets dropped rather than welded if
-       it becomes cursed; ensure that that won't happen here by ending dual-wield */
+    /* when dual-wielding, the second weapon gets dropped rather than
+       welded if it becomes cursed; ensure that that won't happen here
+       by ending dual-wield */
     u.twoweap = FALSE; /* bypass set_twoweap() */
 
-    /* all inventory is dropped (for the normal case), even non-droppable things
-       like worn armor and accessories, welded weapon, or cursed loadstones */
+    /* all inventory is dropped (for the normal case), even non-droppable
+       things like worn armor and accessories, welded weapon, or cursed
+       loadstones */
     while ((otmp = g.invent) != 0) {
         obj_extract_self(otmp);
         /* when turning into green slime, all gear remains held;
@@ -310,7 +314,7 @@ fixuporacle(struct monst *oracle)
     if (!Is_oracle_level(&u.uz))
         return FALSE;
 
-    oracle->mpeaceful = 1;
+    oracle->mpeaceful = 1; /* for behavior toward next character */
     o_ridx = levl[oracle->mx][oracle->my].roomno - ROOMOFFSET;
     if (o_ridx >= 0 && g.rooms[o_ridx].rtype == DELPHI)
         return TRUE; /* no fixup needed */
@@ -377,14 +381,27 @@ can_make_bones(void)
     return TRUE;
 }
 
+/* monster removed before saving a bones file,
+   in case these characters are not in their home bases */
+static void
+remove_mon_from_bones(struct monst *mtmp)
+{
+    struct permonst *mptr = mtmp->data;
+
+    if (mtmp->iswiz || mptr == &mons[PM_MEDUSA]
+        || mptr->msound == MS_NEMESIS || mptr->msound == MS_LEADER
+        || mptr == &mons[PM_VLAD_THE_IMPALER]
+        || (mptr == &mons[PM_ORACLE] && !fixuporacle(mtmp)))
+        mongone(mtmp);
+}
+
 /* save bones and possessions of a deceased adventurer */
 void
 savebones(int how, time_t when, struct obj *corpse)
 {
-    int x, y;
+    coordxy x, y;
     struct trap *ttmp;
     struct monst *mtmp;
-    struct permonst *mptr;
     struct fruit *f;
     struct cemetery *newbones;
     char c, *bonesid;
@@ -413,30 +430,23 @@ savebones(int how, time_t when, struct obj *corpse)
 
  make_bones:
     unleash_all();
-    /* in case these characters are not in their home bases */
-    for (mtmp = fmon; mtmp; mtmp = mtmp->nmon) {
-        if (DEADMONSTER(mtmp))
-            continue;
-        mptr = mtmp->data;
-        if (mtmp->iswiz || mptr == &mons[PM_MEDUSA]
-            || mptr->msound == MS_NEMESIS || mptr->msound == MS_LEADER
-            || mptr == &mons[PM_VLAD_THE_IMPALER]
-            || (mptr == &mons[PM_ORACLE] && !fixuporacle(mtmp)))
-            mongone(mtmp);
-    }
+    /* new ghost or other undead isn't punished even if hero was;
+       end-of-game disclosure has already had a chance to report the
+       Punished status so we don't need to preserve it any further */
+    if (Punished)
+        unpunish(); /* unwear uball, destroy uchain */
+    /* in case dismounting kills steed [is that even possible?], do so
+       before cleaning up dead monsters */
     if (u.usteed)
         dismount_steed(DISMOUNT_BONES);
-    dmonsfree(); /* discard dead or gone monsters */
 
-    /* mark all fruits as nonexistent; when we come to them we'll mark
-     * them as existing (using goodfruit())
-     */
+    iter_mons(remove_mon_from_bones); /* send various unique monsters away, */
+    dmonsfree();                      /* then discard dead or gone monsters */
+
+    /* mark all named fruits as nonexistent; if/when we come to instances
+       of any of them we'll mark those as existing (using goodfruit()) */
     for (f = g.ffruit; f; f = f->nextf)
         f->fid = -f->fid;
-
-    /* check iron balls separately--maybe they're not carrying it */
-    if (uball)
-        uball->owornmask = uchain->owornmask = 0L;
 
     /* dispose of your possessions, usually cursed */
     if (u.ugrave_arise == (NON_PM - 1)) {
@@ -500,7 +510,7 @@ savebones(int how, time_t when, struct obj *corpse)
     }
     for (ttmp = g.ftrap; ttmp; ttmp = ttmp->ntrap) {
         ttmp->madeby_u = 0;
-        ttmp->tseen = (ttmp->ttyp == HOLE);
+        ttmp->tseen = unhideable_trap(ttmp->ttyp);
     }
     resetobjs(fobj, FALSE);
     resetobjs(g.level.buriedobjlist, FALSE);
@@ -526,7 +536,8 @@ savebones(int how, time_t when, struct obj *corpse)
     /* format name+role,&c, death reason, and date+time;
        gender and alignment reflect final values rather than what the
        character started out as, same as topten and logfile entries */
-    Sprintf(newbones->who, "%s-%.3s-%.3s-%.3s-%.3s", g.plname, g.urole.filecode,
+    Sprintf(newbones->who, "%s-%.3s-%.3s-%.3s-%.3s",
+            g.plname, g.urole.filecode,
             g.urace.filecode, genders[flags.female].filecode,
             aligns[1 - u.ualign.type].filecode);
     formatkiller(newbones->how, sizeof newbones->how, how, TRUE);
@@ -660,6 +671,7 @@ getbones(void)
             }
             resetobjs(fobj, TRUE);
             resetobjs(g.level.buriedobjlist, TRUE);
+            fix_shop_damage();
         }
     }
     close_nhfile(nhfp);

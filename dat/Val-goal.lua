@@ -1,11 +1,11 @@
--- NetHack 3.7	Valkyrie.des	$NHDT-Date: 1553807172 2019/03/28 21:06:12 $  $NHDT-Branch: NetHack-3.6.2-beta01 $:$NHDT-Revision: 1.15 $
+-- NetHack Valkyrie Val-goal.lua	$NHDT-Date: 1652196017 2022/05/10 15:20:17 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.5 $
 --	Copyright (c) 1989 by Jean-Christophe Collet
 --	Copyright (c) 1991-2 by M. Stephenson
 -- NetHack may be freely redistributed.  See license for details.
 --
 des.level_init({ style = "solidfill", fg = "L" });
 
-des.level_flags("mazelevel", "icedpools", "noflip")
+des.level_flags("mazelevel", "icedpools")
 
 des.level_init({ style="mines", fg=".", bg="L", smoothed=true, joined=true, lit=1, walled=false })
 
@@ -32,6 +32,8 @@ xxxxxxxxx..................xxxxxxxx
 des.region(selection.area(00,00,34,16), "lit")
 -- Stairs
 -- Note:  The up stairs are *intentionally* off of the map.
+-- if the stairs are surrounded by lava, maybe give some room
+des.replace_terrain({ region = {44,09, 46,11}, fromterrain='L', toterrain='.', chance=50 });
 des.stair("up", 45,10)
 -- Non diggable walls
 des.non_diggable(selection.area(00,00,34,16))

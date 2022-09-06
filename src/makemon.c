@@ -1,4 +1,4 @@
-/* NetHack 3.7	makemon.c	$NHDT-Date: 1646694721 2022/03/07 23:12:01 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.199 $ */
+/* NetHack 3.7	makemon.c	$NHDT-Date: 1651886995 2022/05/07 01:29:55 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.204 $ */
 /* Copyright (c) Stichting Mathematisch Centrum, Amsterdam, 1985. */
 /*-Copyright (c) Robert Patrick Rankin, 2012. */
 /* NetHack may be freely redistributed.  See license for details. */
@@ -18,7 +18,7 @@ static boolean uncommon(int);
 static int align_shift(struct permonst *);
 static boolean mk_gen_ok(int, unsigned, unsigned);
 static boolean wrong_elem_type(struct permonst *);
-static void m_initgrp(struct monst *, int, int, int, mmflags_nht);
+static void m_initgrp(struct monst *, coordxy, coordxy, int, mmflags_nht);
 static void m_initthrow(struct monst *, int, int);
 static void m_initweap(struct monst *);
 static void m_initinv(struct monst *);
@@ -71,7 +71,7 @@ wrong_elem_type(struct permonst *ptr)
 
 /* make a group just like mtmp */
 static void
-m_initgrp(struct monst *mtmp, int x, int y, int n, mmflags_nht mmflags)
+m_initgrp(struct monst *mtmp, coordxy x, coordxy y, int n, mmflags_nht mmflags)
 {
     coord mm;
     register int cnt = rnd(n);
@@ -328,7 +328,7 @@ m_initweap(register struct monst *mtmp)
                  && sgn(mtmp->isminion ? EMIN(mtmp)->min_align
                                        : ptr->maligntyp) == A_LAWFUL)
                 otmp = oname(otmp,
-                             artiname(rn2(2) ? ART_DEMONBANE : ART_SUNSWORD),
+                             artiname(ART_SUNSWORD),
                              ONAME_RANDOM); /* randomly created */
             bless(otmp);
             otmp->oerodeproof = TRUE;
@@ -815,7 +815,7 @@ m_initinv(register struct monst *mtmp)
 /* Note: for long worms, always call cutworm (cutworm calls clone_mon) */
 struct monst *
 clone_mon(struct monst *mon,
-          xchar x, xchar y) /* clone's preferred location or 0 (near mon) */
+          coordxy x, coordxy y) /* clone's preferred location or 0 (near mon) */
 {
     coord mm;
     struct monst *m2;
@@ -871,7 +871,7 @@ clone_mon(struct monst *mon,
     /* ms->isminion handled below */
 
     /* clone shouldn't be reluctant to move on spots 'parent' just moved on */
-    (void) memset((genericptr_t) m2->mtrack, 0, sizeof m2->mtrack);
+    mon_track_clear(m2);
 
     place_monster(m2, m2->mx, m2->my);
     if (emits_light(m2->data))
@@ -1054,7 +1054,7 @@ makemon_rnd_goodpos(
     coord *cc) /* output */
 {
     int tryct = 0;
-    int nx, ny;
+    coordxy nx, ny;
     boolean good;
 
     do {
@@ -1068,9 +1068,9 @@ makemon_rnd_goodpos(
         /* else go through all map positions, twice, first round
            ignoring positions in sight, and pick first good one.
            skip first round if we're in special level loader or blind */
-        int xofs = nx;
-        int yofs = ny;
-        int dx,dy;
+        coordxy xofs = nx;
+        coordxy yofs = ny;
+        coordxy dx,dy;
         int bl = (g.in_mklev || Blind) ? 1 : 0;
 
         for ( ; bl < 2; bl++) {
@@ -1120,14 +1120,15 @@ makemon_rnd_goodpos(
 struct monst *
 makemon(
     struct permonst *ptr,
-    int x, int y,
+    coordxy x, coordxy y,
     mmflags_nht mmflags)
 {
     register struct monst *mtmp;
     struct monst fakemon;
     coord cc;
     int mndx, mcham, ct, mitem;
-    boolean anymon = !ptr,
+    boolean femaleok, maleok,
+            anymon = !ptr,
             byyou = u_at(x, y),
             allow_minvent = ((mmflags & NO_MINVENT) == 0),
             countbirth = ((mmflags & MM_NOCOUNTBIRTH) == 0),
@@ -1230,10 +1231,13 @@ makemon(
     /* set up level and hit points */
     newmonhp(mtmp, mndx);
 
-    if (is_female(ptr) || ((mmflags & MM_FEMALE) && !is_male(ptr)))
-        mtmp->female = TRUE;
-    else if (is_male(ptr) || ((mmflags & MM_MALE) && !is_female(ptr)))
-        mtmp->female = FALSE;
+    femaleok = (!is_male(ptr) && !is_neuter(ptr));
+    maleok = (!is_female(ptr) && !is_neuter(ptr));
+    if (is_female(ptr) || ((mmflags & MM_FEMALE) != 0 && femaleok))
+        mtmp->female = 1;
+    else if (is_male(ptr) || ((mmflags & MM_MALE) != 0 && maleok))
+        mtmp->female = 0;
+
     /* leader and nemesis gender is usually hardcoded in mons[],
        but for ones which can be random, it has already been chosen
        (in role_init(), for possible use by the quest pager code) */
@@ -1241,16 +1245,22 @@ makemon(
         mtmp->female = g.quest_status.ldrgend;
     else if (ptr->msound == MS_NEMESIS && quest_info(MS_NEMESIS) == mndx)
         mtmp->female = g.quest_status.nemgend;
-    else
-        mtmp->female = rn2(2); /* ignored for neuters */
 
-    if (In_sokoban(&u.uz) && !mindless(ptr)) /* know about traps here */
-        mtmp->mtrapseen = (1L << (PIT - 1)) | (1L << (HOLE - 1));
+    /* female used to be set randomly here even for neuters on the
+       grounds that it was ignored, but after corpses were changed to
+       retain gender it matters because it affects stacking of corpses */
+    else
+        mtmp->female = femaleok ? rn2(2) : 0;
+
+    if (In_sokoban(&u.uz) && !mindless(ptr)) { /* know about traps here */
+        mon_learns_traps(mtmp, PIT);
+        mon_learns_traps(mtmp, HOLE);
+    }
     if (Is_stronghold(&u.uz) && !mindless(ptr)) /* know about the trap doors */
-        mtmp->mtrapseen = (1L << (TRAPDOOR - 1));
+        mon_learns_traps(mtmp, TRAPDOOR);
     /* quest leader and nemesis both know about all trap types */
     if (ptr->msound == MS_LEADER || ptr->msound == MS_NEMESIS)
-        mtmp->mtrapseen = ~0;
+        mon_learns_traps(mtmp, ALL_TRAPS);
 
     place_monster(mtmp, x, y);
     mtmp->mcansee = mtmp->mcanmove = TRUE;
@@ -1265,7 +1275,7 @@ makemon(
     case S_SNAKE:
         if (g.in_mklev)
             if (x && y)
-                (void) mkobj_at(0, x, y, TRUE);
+                (void) mkobj_at(RANDOM_CLASS, x, y, TRUE);
         (void) hideunder(mtmp);
         break;
     case S_LIGHT:
@@ -1318,7 +1328,7 @@ makemon(
                to the level's difficulty but ignoring the changer's usual
                type selection, so was inappropriate for vampshifters.
                Let newcham() pick the shape. */
-            && newcham(mtmp, (struct permonst *) 0, FALSE, FALSE))
+            && newcham(mtmp, (struct permonst *) 0, NO_NC_FLAGS))
             allow_minvent = FALSE;
     } else if (mndx == PM_WIZARD_OF_YENDOR) {
         mtmp->iswiz = TRUE;
@@ -1351,10 +1361,11 @@ makemon(
     if (is_dprince(ptr) && ptr->msound == MS_BRIBE) {
         mtmp->mpeaceful = mtmp->minvis = mtmp->perminvis = 1;
         mtmp->mavenge = 0;
-        if (uwep && (uwep->oartifact == ART_EXCALIBUR
-                     || uwep->oartifact == ART_DEMONBANE))
+        if (u_wield_art(ART_EXCALIBUR) || u_wield_art(ART_DEMONBANE))
             mtmp->mpeaceful = mtmp->mtame = FALSE;
     }
+    if (mndx == PM_RAVEN && uwep && uwep->otyp == BEC_DE_CORBIN)
+        mtmp->mpeaceful = TRUE;
     if (mndx == PM_LONG_WORM && (mtmp->wormno = get_wormno()) != 0) {
         initworm(mtmp, allowtail ? rn2(5) : 0);
         if (count_wsegs(mtmp))
@@ -1448,6 +1459,10 @@ makemon(
                         : "",
                       exclaim ? '!' : '.');
         }
+        /* if discernable and a threat, stop fiddling while Rome burns */
+        if (g.occupation)
+            (void) dochugw(mtmp, FALSE);
+
         /* TODO: unify with teleport appears msg */
     }
 
@@ -1497,12 +1512,13 @@ mbirth_limit(int mndx)
 /* used for wand/scroll/spell of create monster */
 /* returns TRUE iff you know monsters have been created */
 boolean
-create_critters(int cnt,
-                struct permonst *mptr, /* usually null; used for confused reading */
-                boolean neverask)
+create_critters(
+    int cnt,
+    struct permonst *mptr, /* usually null; used for confused reading */
+    boolean neverask)
 {
     coord c;
-    int x, y;
+    coordxy x, y;
     struct monst *mon;
     boolean known = FALSE;
     boolean ask = (wizard && !neverask);
@@ -1583,6 +1599,13 @@ align_shift(register struct permonst *ptr)
 struct permonst *
 rndmonst(void)
 {
+    return rndmonst_adj(0, 0);
+}
+
+/* select a random monster type, with adjusted difficulty */
+struct permonst *
+rndmonst_adj(int minadj, int maxadj)
+{
     register struct permonst *ptr;
     register int mndx;
     int weight, totalweight, selected_mndx, zlevel, minmlev, maxmlev;
@@ -1592,8 +1615,8 @@ rndmonst(void)
         return ptr;
 
     zlevel = level_difficulty();
-    minmlev = monmin_difficulty(zlevel);
-    maxmlev = monmax_difficulty(zlevel);
+    minmlev = monmin_difficulty(zlevel) + minadj;
+    maxmlev = monmax_difficulty(zlevel) + maxadj;
     upper = Is_rogue_level(&u.uz); /* prefer uppercase only on rogue level */
     elemlevel = In_endgame(&u.uz) && !Is_astralevel(&u.uz); /* elmntl plane */
 
@@ -1951,13 +1974,15 @@ grow_up(struct monst *mtmp, struct monst *victim)
                   an(buf));
         }
         set_mon_data(mtmp, ptr);
+        if (mtmp->cham == oldtype && is_shapeshifter(ptr))
+            mtmp->cham = newtype; /* vampire growing into vampire lord */
         newsym(mtmp->mx, mtmp->my);    /* color may change */
         lev_limit = (int) mtmp->m_lev; /* never undo increment */
 
         mtmp->female = fem; /* gender might be changing */
         /* if 'mtmp' is leashed, persistent inventory window needs updating */
         if (mtmp->mleashed)
-            update_inventory(); /* x - leash (attached to a <mon> */
+            update_inventory(); /* x - leash (attached to a <mon>) */
     }
 
     /* sanity checks */

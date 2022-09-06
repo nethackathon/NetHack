@@ -17,8 +17,8 @@ union vlaunchinfo {
 
 struct trap {
     struct trap *ntrap;
-    xchar tx, ty;
-    d_level dst; /* destination for portals */
+    coordxy tx, ty;
+    d_level dst; /* destination for portals/holes/trapdoors */
     coord launch;
     Bitfield(ttyp, 5);
     Bitfield(tseen, 1);
@@ -54,6 +54,7 @@ struct trap {
 
 /* unconditional traps */
 enum trap_types {
+    ALL_TRAPS    = -1, /* mon_knows_traps(), mon_learns_traps() */
     NO_TRAP      =  0,
     ARROW_TRAP   =  1,
     DART_TRAP    =  2,
@@ -77,9 +78,18 @@ enum trap_types {
     MAGIC_TRAP   = 20,
     ANTI_MAGIC   = 21,
     POLY_TRAP    = 22,
-    VIBRATING_SQUARE = 23,
+    VIBRATING_SQUARE = 23, /* not a trap but shown/remembered as if one
+                            * once it has been discovered */
 
-    TRAPNUM      = 24
+    /* trapped door and trapped chest aren't traps on the map, but they
+       might be shown/remembered as such after trap detection until hero
+       comes in view of them and sees the feature or object;
+       key-using or door-busting monsters who survive a door trap learn
+       to avoid other such doors [not implemented] */
+    TRAPPED_DOOR = 24, /* part of door; not present on map as a trap */
+    TRAPPED_CHEST = 25, /* part of object; not on map */
+
+    TRAPNUM = 26
 };
 
 /* some trap-related function return results */
@@ -92,6 +102,7 @@ enum { Trap_Effect_Finished = 0,
 
 #define is_pit(ttyp) ((ttyp) == PIT || (ttyp) == SPIKED_PIT)
 #define is_hole(ttyp)  ((ttyp) == HOLE || (ttyp) == TRAPDOOR)
+#define unhideable_trap(ttyp) ((ttyp) == HOLE) /* visible traps */
 #define undestroyable_trap(ttyp) ((ttyp) == MAGIC_PORTAL         \
                                   || (ttyp) == VIBRATING_SQUARE)
 #define is_magical_trap(ttyp) ((ttyp) == TELEP_TRAP     \

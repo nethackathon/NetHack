@@ -164,7 +164,7 @@ is_pure(boolean talk)
         } else if (u.ualign.record < MIN_QUEST_ALIGN) {
             You("are currently %d and require %d.", u.ualign.record,
                 MIN_QUEST_ALIGN);
-            if (yn_function("adjust?", (char *) 0, 'y') == 'y')
+            if (yn_function("adjust?", (char *) 0, 'y', TRUE) == 'y')
                 u.ualign.record = MIN_QUEST_ALIGN;
         }
     }
@@ -194,6 +194,7 @@ expulsion(boolean seal)
     dest = (br->end1.dnum == u.uz.dnum) ? &br->end2 : &br->end1;
     if (seal)
         portal_flag |= UTOTYPE_RMPORTAL;
+    nomul(0); /* stop running */
     schedule_goto(dest, portal_flag, (char *) 0, (char *) 0);
     if (seal) { /* remove the portal to the quest - sealing it off */
         int reexpelled = u.uevent.qexpelled;

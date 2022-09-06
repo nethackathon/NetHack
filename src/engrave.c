@@ -177,7 +177,7 @@ can_reach_floor(boolean check_pit)
 
 /* give a message after caller has determined that hero can't reach */
 void
-cant_reach_floor(int x, int y, boolean up, boolean check_pit)
+cant_reach_floor(coordxy x, coordxy y, boolean up, boolean check_pit)
 {
     You("can't reach the %s.",
         up ? ceiling(x, y)
@@ -187,12 +187,15 @@ cant_reach_floor(int x, int y, boolean up, boolean check_pit)
 }
 
 const char *
-surface(int x, int y)
+surface(coordxy x, coordxy y)
 {
     struct rm *lev = &levl[x][y];
 
     if (u_at(x, y) && u.uswallow && is_animal(u.ustuck->data))
-        return "maw";
+        /* 'husk' is iffy but maw is wrong for 't' class */
+        return digests(u.ustuck->data) ? "maw"
+               : enfolds(u.ustuck->data) ? "husk"
+                 : "nonesuch"; /* can't happen (fingers crossed...) */
     else if (IS_AIR(lev->typ) && Is_airlevel(&u.uz))
         return "air";
     else if (is_pool(x, y))
@@ -218,7 +221,7 @@ surface(int x, int y)
 }
 
 const char *
-ceiling(int x, int y)
+ceiling(coordxy x, coordxy y)
 {
     struct rm *lev = &levl[x][y];
     const char *what;
@@ -249,7 +252,7 @@ ceiling(int x, int y)
 }
 
 struct engr *
-engr_at(xchar x, xchar y)
+engr_at(coordxy x, coordxy y)
 {
     register struct engr *ep = head_engr;
 
@@ -269,7 +272,7 @@ engr_at(xchar x, xchar y)
  * present if it is intact and is the entire content of the engraving.
  */
 boolean
-sengr_at(const char *s, xchar x, xchar y, boolean strict)
+sengr_at(const char *s, coordxy x, coordxy y, boolean strict)
 {
     register struct engr *ep = engr_at(x, y);
 
@@ -288,7 +291,7 @@ u_wipe_engr(int cnt)
 }
 
 void
-wipe_engr_at(xchar x, xchar y, xchar cnt, boolean magical)
+wipe_engr_at(coordxy x, coordxy y, xint16 cnt, boolean magical)
 {
     register struct engr *ep = engr_at(x, y);
 
@@ -310,7 +313,7 @@ wipe_engr_at(xchar x, xchar y, xchar cnt, boolean magical)
 }
 
 void
-read_engr_at(int x, int y)
+read_engr_at(coordxy x, coordxy y)
 {
     struct engr *ep = engr_at(x, y);
     int sensed = 0;
@@ -384,7 +387,7 @@ read_engr_at(int x, int y)
 }
 
 void
-make_engr_at(int x, int y, const char *s, long e_time, xchar e_type)
+make_engr_at(coordxy x, coordxy y, const char *s, long e_time, xint16 e_type)
 {
     struct engr *ep;
     unsigned smem = Strlen(s) + 1;
@@ -409,7 +412,7 @@ make_engr_at(int x, int y, const char *s, long e_time, xchar e_type)
 
 /* delete any engraving at location <x,y> */
 void
-del_engr_at(int x, int y)
+del_engr_at(coordxy x, coordxy y)
 {
     struct engr *ep = engr_at(x, y);
 
@@ -461,6 +464,8 @@ u_can_engrave(void)
             cant_reach_floor(u.ux, u.uy, FALSE, FALSE);
             return FALSE;
         }
+        /* Note: for amorphous engulfers, writing attempt is allowed here
+           but yields the 'jello' result in doengrave() */
     } else if (is_lava(u.ux, u.uy)) {
         You_cant("write on the %s!", surface(u.ux, u.uy));
         return FALSE;
@@ -524,8 +529,8 @@ doengrave(void)
     boolean ptext = TRUE;     /* TRUE if we must prompt for engrave text */
     boolean teleengr = FALSE; /* TRUE if we move the old engraving */
     boolean zapwand = FALSE;  /* TRUE if we remove a wand charge */
-    xchar type = DUST;        /* Type of engraving made */
-    xchar oetype = 0;         /* will be set to type of current engraving */
+    xint16 type = DUST;       /* Type of engraving made */
+    xint16 oetype = 0;        /* will be set to type of current engraving */
     char buf[BUFSZ];          /* Buffer for final/poly engraving text */
     char ebuf[BUFSZ];         /* Buffer for initial engraving text */
     char fbuf[BUFSZ];         /* Buffer for "your fingers" */
@@ -703,7 +708,7 @@ doengrave(void)
             case WAN_POLYMORPH:
                 if (oep) {
                     if (!Blind) {
-                        type = (xchar) 0; /* random */
+                        type = (xint16) 0; /* random */
                         (void) random_engraving(buf);
                     } else {
                         /* keep the same type so that feels don't
@@ -769,7 +774,7 @@ doengrave(void)
                 ptext = TRUE;
                 type = ENGRAVE;
                 if (!objects[otmp->otyp].oc_name_known) {
-                    if (flags.verbose)
+                    if (Verbose(1, doengrave1))
                         pline("This %s is a wand of digging!", xname(otmp));
                     doknown = TRUE;
                 }
@@ -792,7 +797,7 @@ doengrave(void)
                 ptext = TRUE;
                 type = BURN;
                 if (!objects[otmp->otyp].oc_name_known) {
-                    if (flags.verbose)
+                    if (Verbose(1, doengrave2))
                         pline("This %s is a wand of fire!", xname(otmp));
                     doknown = TRUE;
                 }
@@ -803,7 +808,7 @@ doengrave(void)
                 ptext = TRUE;
                 type = BURN;
                 if (!objects[otmp->otyp].oc_name_known) {
-                    if (flags.verbose)
+                    if (Verbose(1, doengrave3))
                         pline("This %s is a wand of lightning!", xname(otmp));
                     doknown = TRUE;
                 }
@@ -837,7 +842,7 @@ doengrave(void)
         break;
 
     case WEAPON_CLASS:
-        if (otmp->oartifact == ART_FIRE_BRAND)
+        if (is_art(otmp, ART_FIRE_BRAND))
             type = BURN;
         else if (is_blade(otmp)) {
             if ((int) otmp->spe > -3)
@@ -969,7 +974,7 @@ doengrave(void)
                    && (!Blind || oep->engr_type == BURN
                        || oep->engr_type == ENGRAVE)) {
             c = yn_function("Do you want to add to the current engraving?",
-                            ynqchars, 'y');
+                            ynqchars, 'y', TRUE);
             if (c == 'q') {
                 pline1(Never_mind);
                 return ECMD_OK;
@@ -1074,7 +1079,8 @@ doengrave(void)
     /* A single `x' is the traditional signature of an illiterate person */
     if (len != 1 || (!index(ebuf, 'x') && !index(ebuf, 'X')))
         if (!u.uconduct.literate++)
-            livelog_printf(LL_CONDUCT, "became literate by engraving \"%s\"", ebuf);
+            livelog_printf(LL_CONDUCT, "became literate by engraving \"%s\"",
+                           ebuf);
 
     /* Mix up engraving if surface or state of mind is unsound.
        Note: this won't add or remove any spaces. */
@@ -1437,7 +1443,7 @@ rloc_engr(struct engr *ep)
  * The caller is responsible for newsym(x, y).
  */
 void
-make_grave(int x, int y, const char *str)
+make_grave(coordxy x, coordxy y, const char *str)
 {
     char buf[BUFSZ];
 
