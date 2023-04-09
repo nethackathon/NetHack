@@ -1,4 +1,4 @@
-/* NetHack 3.7	nhlua.c	$NHDT-Date: 1654116350 2022/06/01 20:45:50 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.84 $ */
+/* NetHack 3.7	nhlua.c	$NHDT-Date: 1673740532 2023/01/14 23:55:32 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.95 $ */
 /*      Copyright (c) 2018 by Pasi Kallinen */
 /* NetHack may be freely redistributed.  See license for details. */
 
@@ -36,6 +36,9 @@ static int nhl_timer_has_at(lua_State *);
 static int nhl_timer_peek_at(lua_State *);
 static int nhl_timer_stop_at(lua_State *);
 static int nhl_timer_start_at(lua_State *);
+static int nhl_get_cmd_key(lua_State *);
+static int nhl_callback(lua_State *);
+static int nhl_gamestate(lua_State *);
 static int nhl_test(lua_State *);
 static int nhl_getmap(lua_State *);
 static char splev_typ2chr(schar);
@@ -49,6 +52,7 @@ static int nhl_pline(lua_State *);
 static int nhl_verbalize(lua_State *);
 static int nhl_parse_config(lua_State *);
 static int nhl_menu(lua_State *);
+static int nhl_text(lua_State *);
 static int nhl_getlin(lua_State *);
 static int nhl_makeplural(lua_State *);
 static int nhl_makesingular(lua_State *);
@@ -80,6 +84,7 @@ static const char *const nhcore_call_names[NUM_NHCORE_CALLS] = {
     "restore_old_game",
     "moveloop_turn",
     "game_exit",
+    "getpos_tip",
 };
 static boolean nhcore_call_available[NUM_NHCORE_CALLS];
 
@@ -111,9 +116,9 @@ l_nhcore_init(void)
     /* Sample sbi for getting resource usage information. */
     nhl_sandbox_info sbi = {NHL_SB_SAFE|NHL_SB_REPORT2, 10000000, 10000000, 0};
 #endif
-    if ((g.luacore = nhl_init(&sbi)) != 0) {
-        if (!nhl_loadlua(g.luacore, "nhcore.lua")) {
-            g.luacore = (lua_State *) 0;
+    if ((gl.luacore = nhl_init(&sbi)) != 0) {
+        if (!nhl_loadlua(gl.luacore, "nhcore.lua")) {
+            gl.luacore = (lua_State *) 0;
         } else {
             int i;
 
@@ -127,9 +132,9 @@ l_nhcore_init(void)
 void
 l_nhcore_done(void)
 {
-    if (g.luacore) {
-        nhl_done(g.luacore);
-        g.luacore = 0;
+    if (gl.luacore) {
+        nhl_done(gl.luacore);
+        gl.luacore = 0;
     }
     end_luapat();
 }
@@ -140,24 +145,24 @@ l_nhcore_call(int callidx)
     int ltyp;
 
     if (callidx < 0 || callidx >= NUM_NHCORE_CALLS
-        || !g.luacore || !nhcore_call_available[callidx])
+        || !gl.luacore || !nhcore_call_available[callidx])
         return;
 
-    lua_getglobal(g.luacore, "nhcore");
-    if (!lua_istable(g.luacore, -1)) {
+    lua_getglobal(gl.luacore, "nhcore");
+    if (!lua_istable(gl.luacore, -1)) {
         /*impossible("nhcore is not a lua table");*/
-        nhl_done(g.luacore);
-        g.luacore = 0;
+        nhl_done(gl.luacore);
+        gl.luacore = 0;
         return;
     }
 
-    lua_getfield(g.luacore, -1, nhcore_call_names[callidx]);
-    ltyp = lua_type(g.luacore, -1);
+    lua_getfield(gl.luacore, -1, nhcore_call_names[callidx]);
+    ltyp = lua_type(gl.luacore, -1);
     if (ltyp == LUA_TFUNCTION) {
-        lua_remove(g.luacore, -2); /* nhcore_call_names[callidx] */
-        lua_remove(g.luacore, -2); /* nhcore */
-        if (nhl_pcall(g.luacore, 0, 1)) {
-            impossible("Lua error: %s", lua_tostring(g.luacore, -1));
+        lua_remove(gl.luacore, -2); /* nhcore_call_names[callidx] */
+        lua_remove(gl.luacore, -2); /* nhcore */
+        if (nhl_pcall(gl.luacore, 0, 1)) {
+            impossible("Lua error: %s", lua_tostring(gl.luacore, -1));
         }
     } else {
         /*impossible("nhcore.%s is not a lua function",
@@ -168,7 +173,7 @@ l_nhcore_call(int callidx)
 
 DISABLE_WARNING_UNREACHABLE_CODE
 
-void
+ATTRNORETURN void
 nhl_error(lua_State *L, const char *msg)
 {
     lua_Debug ar;
@@ -188,7 +193,6 @@ nhl_error(lua_State *L, const char *msg)
 #endif
     (void) lua_error(L);
     /*NOTREACHED*/
-    /* UNREACHABLE_CODE */
 }
 
 RESTORE_WARNING_UNREACHABLE_CODE
@@ -208,6 +212,8 @@ lcheck_param_table(lua_State *L)
 
     luaL_checktype(L, 1, LUA_TTABLE);
 }
+
+DISABLE_WARNING_UNREACHABLE_CODE
 
 schar
 get_table_mapchr(lua_State *L, const char *name)
@@ -231,7 +237,7 @@ get_table_mapchr_opt(lua_State *L, const char *name, schar defval)
     xint8 typ;
 
     ter = get_table_str_opt(L, name, emptystr);
-    if (name && *ter) {
+    if (name && ter && *ter) {
         typ = (xint8) check_mapchr(ter);
         if (typ == INVALID_TYPE)
             nhl_error(L, "Erroneous map char");
@@ -256,6 +262,8 @@ nhl_get_timertype(lua_State *L, int idx)
         nhl_error(L, "Unknown timer type");
     return ret;
 }
+
+RESTORE_WARNING_UNREACHABLE_CODE
 
 void
 nhl_add_table_entry_int(lua_State *L, const char *name, lua_Integer value)
@@ -335,6 +343,7 @@ const struct {
                 { '}', MOAT },
                 { 'P', POOL },
                 { 'L', LAVAPOOL },
+                { 'Z', LAVAWALL },
                 { 'I', ICE },
                 { 'W', WATER },
                 { 'T', TREE },
@@ -375,6 +384,8 @@ splev_typ2chr(schar typ)
     return 'x';
 }
 
+DISABLE_WARNING_UNREACHABLE_CODE
+
 /* local t = nh.gettrap(x,y); */
 /* local t = nh.gettrap({ x = 10, y = 10 }); */
 static int
@@ -385,6 +396,7 @@ nhl_gettrap(lua_State *L)
 
     if (!nhl_get_xy_params(L, &lx, &ly)) {
         nhl_error(L, "Incorrect arguments");
+        /*NOTREACHED*/
         return 0;
     }
     x = (coordxy) lx;
@@ -436,6 +448,7 @@ nhl_deltrap(lua_State *L)
 
     if (!nhl_get_xy_params(L, &lx, &ly)) {
         nhl_error(L, "Incorrect arguments");
+        /*NOTREACHED*/
         return 0;
     }
     x = (coordxy) lx;
@@ -450,6 +463,8 @@ nhl_deltrap(lua_State *L)
     }
     return 0;
 }
+
+RESTORE_WARNING_UNREACHABLE_CODE
 
 /* get parameters (XX,YY) or ({ x = XX, y = YY }) or ({ XX, YY }),
    and set the x and y values.
@@ -574,8 +589,6 @@ nhl_getmap(lua_State *L)
     }
 }
 
-RESTORE_WARNING_CONDEXPR_IS_CONSTANT
-
 /* impossible("Error!") */
 static int
 nhl_impossible(lua_State *L)
@@ -590,14 +603,17 @@ nhl_impossible(lua_State *L)
 }
 
 /* pline("It hits!") */
+/* pline("It hits!", true) */
 static int
 nhl_pline(lua_State *L)
 {
     int argc = lua_gettop(L);
 
-    if (argc == 1)
+    if (argc == 1 || argc == 2) {
         pline("%s", luaL_checkstring(L, 1));
-    else
+        if (lua_toboolean(L, 2))
+            display_nhwindow(WIN_MESSAGE, TRUE); /* --more-- */
+    } else
         nhl_error(L, "Wrong args");
 
     return 0;
@@ -664,6 +680,7 @@ nhl_getlin(lua_State *L)
     }
 
     nhl_error(L, "Wrong args");
+    /*NOTREACHED*/
     return 0;
 }
 
@@ -688,6 +705,7 @@ nhl_menu(lua_State *L)
 
     if (argc < 2 || argc > 4) {
         nhl_error(L, "Wrong args");
+        /*NOTREACHED*/
         return 0;
     }
 
@@ -757,6 +775,53 @@ nhl_menu(lua_State *L)
     }
 
     return 1;
+}
+
+/* text("foo\nbar\nbaz") */
+static int
+nhl_text(lua_State *L)
+{
+    int argc = lua_gettop(L);
+
+    if (argc > 0) {
+        menu_item *picks = (menu_item *) 0;
+        winid tmpwin;
+        anything any = cg.zeroany;
+
+        tmpwin = create_nhwindow(NHW_MENU);
+        start_menu(tmpwin, MENU_BEHAVE_STANDARD);
+
+        while (lua_gettop(L) > 0) {
+            char *ostr = dupstr(luaL_checkstring(L, 1));
+            char *ptr, *str = ostr;
+            char *lstr = str + strlen(str) - 1;
+
+            do {
+                char *nlp = strchr(str, '\n');
+
+                if (nlp && (nlp - str) <= 76) {
+                    ptr = nlp;
+                } else {
+                    ptr = str + 76;
+                    if (ptr > lstr)
+                        ptr = lstr;
+                }
+                while ((ptr > str) && !(*ptr == ' ' || *ptr == '\n'))
+                    ptr--;
+                *ptr = '\0';
+                add_menu(tmpwin, &nul_glyphinfo, &any, 0, 0, ATR_NONE, 0,
+                         str, MENU_ITEMFLAGS_NONE);
+                str = ptr + 1;
+            } while (*str && str <= lstr);
+            lua_pop(L, 1);
+            free(ostr);
+        }
+
+        end_menu(tmpwin, (char *) 0);
+        (void) select_menu(tmpwin, PICK_NONE, &picks);
+        destroy_nhwindow(tmpwin);
+    }
+    return 0;
 }
 
 /* makeplural("zorkmid") */
@@ -873,6 +938,8 @@ nhl_level_difficulty(lua_State *L)
     }
     return 1;
 }
+
+RESTORE_WARNING_UNREACHABLE_CODE
 
 /* get mandatory integer value from table */
 int
@@ -1010,8 +1077,8 @@ nhl_dnum_name(lua_State *L)
     if (argc == 1) {
         lua_Integer dnum = luaL_checkinteger(L, 1);
 
-        if (dnum >= 0 && dnum < g.n_dgns)
-            lua_pushstring(L, g.dungeons[dnum].dname);
+        if (dnum >= 0 && dnum < gn.n_dgns)
+            lua_pushstring(L, gd.dungeons[dnum].dname);
         else
             lua_pushstring(L, "");
     } else
@@ -1019,11 +1086,156 @@ nhl_dnum_name(lua_State *L)
     return 1;
 }
 
+DISABLE_WARNING_UNREACHABLE_CODE
+/* because nhl_error() does not return */
+
+/* set or get variables which are saved and restored along with the game.
+   nh.variable("test", 10);
+   local ten = nh.variable("test"); */
+static int
+nhl_variable(lua_State *L)
+{
+    int argc = lua_gettop(L);
+    int typ;
+    const char *key;
+
+    if (!gl.luacore) {
+        nhl_error(L, "nh luacore not inited");
+        /*NOTREACHED*/
+        return 0;
+    }
+
+    lua_getglobal(gl.luacore, "nh_lua_variables");
+    if (!lua_istable(gl.luacore, -1)) {
+        impossible("nh_lua_variables is not a lua table");
+        return 0;
+    }
+
+    if (argc == 1) {
+        key = luaL_checkstring(L, 1);
+
+        lua_getfield(gl.luacore, -1, key);
+        typ = lua_type(gl.luacore, -1);
+        if (typ == LUA_TSTRING)
+            lua_pushstring(L, lua_tostring(gl.luacore, -1));
+        else if (typ == LUA_TNIL)
+            lua_pushnil(L);
+        else if (typ == LUA_TBOOLEAN)
+            lua_pushboolean(L, lua_toboolean(gl.luacore, -1));
+        else if (typ == LUA_TNUMBER)
+            lua_pushinteger(L, lua_tointeger(gl.luacore, -1));
+        else if (typ == LUA_TTABLE) {
+            lua_getglobal(gl.luacore, "nh_get_variables_string");
+            lua_pushvalue(gl.luacore, -2);
+            nhl_pcall(gl.luacore, 1, 1);
+            luaL_loadstring(L, lua_tostring(gl.luacore, -1));
+            nhl_pcall(L, 0, 1);
+        } else
+            nhl_error(L, "Cannot get variable of that type");
+        return 1;
+    } else if (argc == 2) {
+        /* set nh_lua_variables[key] = value;
+           nh.variable("key", value); */
+        key = luaL_checkstring(L, 1);
+        //pline("SETVAR:%s", key);
+        typ = lua_type(L, -1);
+
+        if (typ == LUA_TSTRING) {
+            lua_pushstring(gl.luacore, lua_tostring(L, -1));
+            lua_setfield(gl.luacore, -2, key);
+        } else if (typ == LUA_TNIL) {
+            lua_pushnil(gl.luacore);
+            lua_setfield(gl.luacore, -2, key);
+        } else if (typ == LUA_TBOOLEAN) {
+            lua_pushboolean(gl.luacore, lua_toboolean(L, -1));
+            lua_setfield(gl.luacore, -2, key);
+        } else if (typ == LUA_TNUMBER) {
+            lua_pushinteger(gl.luacore, lua_tointeger(L, -1));
+            lua_setfield(gl.luacore, -2, key);
+        } else if (typ == LUA_TTABLE) {
+            lua_getglobal(L, "nh_set_variables_string");
+            lua_pushstring(L, key);
+            lua_pushvalue(L, -3); /* copy value to top */
+            nhl_pcall(L, 2, 1);
+            luaL_loadstring(gl.luacore, lua_tostring(L, -1));
+            nhl_pcall(gl.luacore, 0, 0);
+        } else
+            nhl_error(L, "Cannot set variable of that type");
+        return 0;
+    } else
+        nhl_error(L, "Wrong number of arguments");
+    return 1;
+}
+
+/* return nh_lua_variable lua table as a string */
+char *
+get_nh_lua_variables(void)
+{
+    char *key = NULL;
+
+    if (!gl.luacore) {
+        nhl_error(gl.luacore, "nh luacore not inited");
+        /*NOTREACHED*/
+        return key;
+    }
+
+    lua_getglobal(gl.luacore, "nh_lua_variables");
+    if (!lua_istable(gl.luacore, -1)) {
+        impossible("nh_lua_variables is not a lua table");
+        return key;
+    }
+
+    lua_getglobal(gl.luacore, "get_variables_string");
+    if (lua_type(gl.luacore, -1) == LUA_TFUNCTION) {
+        if (nhl_pcall(gl.luacore, 0, 1)) {
+            impossible("Lua error: %s", lua_tostring(gl.luacore, -1));
+            return key;
+        }
+        key = dupstr(lua_tostring(gl.luacore, -1));
+    }
+    return key;
+}
+
+RESTORE_WARNING_UNREACHABLE_CODE
+
+/* save nh_lua_variables table to file */
+void
+save_luadata(NHFILE *nhfp)
+{
+    unsigned lua_data_len;
+    char *lua_data = get_nh_lua_variables(); /* note: '\0' terminated */
+
+    if (!lua_data)
+        lua_data = dupstr(emptystr);
+    lua_data_len = Strlen(lua_data) + 1; /* +1: include the terminator */
+    bwrite(nhfp->fd, (genericptr_t) &lua_data_len,
+           (unsigned) sizeof lua_data_len);
+    bwrite(nhfp->fd, (genericptr_t) lua_data, lua_data_len);
+    free(lua_data);
+}
+
+/* restore nh_lua_variables table from file */
+void
+restore_luadata(NHFILE *nhfp)
+{
+    unsigned lua_data_len;
+    char *lua_data;
+
+    mread(nhfp->fd, (genericptr_t) &lua_data_len,
+          (unsigned) sizeof lua_data_len);
+    lua_data = (char *) alloc(lua_data_len);
+    mread(nhfp->fd, (genericptr_t) lua_data, lua_data_len);
+    if (!gl.luacore)
+        l_nhcore_init();
+    luaL_loadstring(gl.luacore, lua_data);
+    nhl_pcall(gl.luacore, 0, 0);
+}
+
 /* local stairs = stairways(); */
 static int
 nhl_stairways(lua_State *L)
 {
-    stairway *tmp = g.stairs;
+    stairway *tmp = gs.stairs;
     int i = 1; /* lua arrays should start at 1 */
 
     lua_newtable(L);
@@ -1090,7 +1302,7 @@ nhl_pushkey(lua_State *L)
     return 0;
 }
 
-/* do a turn of moveloop, or until g.multi is done if param is true. */
+/* do a turn of moveloop, or until gm.multi is done if param is true. */
 /* nh.doturn(); nh.doturn(true); */
 static int
 nhl_doturn(lua_State *L)
@@ -1103,7 +1315,7 @@ nhl_doturn(lua_State *L)
 
     do {
         moveloop_core();
-    } while (domulti && g.multi);
+    } while (domulti && gm.multi);
 
     return 0;
 }
@@ -1150,6 +1362,8 @@ nhl_debug_flags(lua_State *L)
     return 0;
 }
 
+DISABLE_WARNING_UNREACHABLE_CODE
+
 /* does location at x,y have timer? */
 /* local has_melttimer = nh.has_timer_at(x,y, "melt-ice"); */
 /* local has_melttimer = nh.has_timer_at({x=4,y=7}, "melt-ice"); */
@@ -1165,6 +1379,7 @@ nhl_timer_has_at(lua_State *L)
     lua_pop(L, 1); /* remove timertype */
     if (!nhl_get_xy_params(L, &lx, &ly)) {
         nhl_error(L, "nhl_timer_has_at: Wrong args");
+        /*NOTREACHED*/
         return 0;
     }
 
@@ -1194,6 +1409,7 @@ nhl_timer_peek_at(lua_State *L)
     lua_pop(L, 1); /* remove timertype */
     if (!nhl_get_xy_params(L, &lx, &ly)) {
         nhl_error(L, "nhl_timer_peek_at: Wrong args");
+        /*NOTREACHED*/
         return 0;
     }
 
@@ -1220,6 +1436,7 @@ nhl_timer_stop_at(lua_State *L)
     lua_pop(L, 1); /* remove timertype */
     if (!nhl_get_xy_params(L, &lx, &ly)) {
         nhl_error(L, "nhl_timer_stop_at: Wrong args");
+        /*NOTREACHED*/
         return 0;
     }
 
@@ -1245,6 +1462,7 @@ nhl_timer_start_at(lua_State *L)
     lua_pop(L, 2); /* remove when and timertype */
     if (!nhl_get_xy_params(L, &lx, &ly)) {
         nhl_error(L, "nhl_timer_start_at: Wrong args");
+        /*NOTREACHED*/
         return 0;
     }
 
@@ -1261,6 +1479,145 @@ nhl_timer_start_at(lua_State *L)
     }
     return 0;
 }
+
+/* returns the visual interpretation of the key bound to an extended command,
+   or the ext cmd name if not bound to any key */
+/* local helpkey = eckey("help"); */
+static int
+nhl_get_cmd_key(lua_State *L)
+{
+    int argc = lua_gettop(L);
+
+    if (argc == 1) {
+        const char *cmd = luaL_checkstring(L, 1);
+        char *key = cmd_from_ecname(cmd);
+
+        lua_pushstring(L, key);
+        return 1;
+    }
+
+    return 0;
+}
+
+/* add or remove a lua function callback */
+/* callback("level_enter", "function_name"); */
+/* callback("level_enter", "function_name", true); */
+/* level_enter, level_leave, cmd_before */
+static int
+nhl_callback(lua_State *L)
+{
+    int argc = lua_gettop(L);
+    int i;
+
+    if (argc == 2) {
+        const char *fn = luaL_checkstring(L, -1);
+        const char *cb = luaL_checkstring(L, -2);
+
+        if (!gl.luacore) {
+            nhl_error(L, "nh luacore not inited");
+            /*NOTREACHED*/
+            return 0;
+        }
+
+        for (i = 0; i < NUM_NHCB; i++)
+            if (!strcmp(cb, nhcb_name[i]))
+                break;
+
+        if (i >= NUM_NHCB)
+            return 0;
+
+        nhcb_counts[i]++;
+
+        lua_getglobal(gl.luacore, "nh_callback_set");
+        lua_pushstring(gl.luacore, cb);
+        lua_pushstring(gl.luacore, fn);
+        nhl_pcall(gl.luacore, 2, 0);
+    } else if (argc == 3) {
+        boolean rm = lua_toboolean(L, -1);
+        const char *fn = luaL_checkstring(L, -2);
+        const char *cb = luaL_checkstring(L, -3);
+
+        if (!gl.luacore) {
+            nhl_error(L, "nh luacore not inited");
+            /*NOTREACHED*/
+            return 0;
+        }
+
+        for (i = 0; i < NUM_NHCB; i++)
+            if (!strcmp(cb, nhcb_name[i]))
+                break;
+
+        if (i >= NUM_NHCB)
+            return 0;
+
+        if (rm) {
+            nhcb_counts[i]--;
+            if (nhcb_counts[i] < 0)
+                impossible("nh.callback counts are wrong");
+        } else {
+            nhcb_counts[i]++;
+        }
+
+        lua_getglobal(gl.luacore, rm ? "nh_callback_rm" : "nh_callback_set");
+        lua_pushstring(gl.luacore, cb);
+        lua_pushstring(gl.luacore, fn);
+        nhl_pcall(gl.luacore, 2, 0);
+    }
+
+    return 0;
+}
+
+/* store or restore game state */
+/* NOTE: doesn't work when saving/restoring the game */
+/* currently handles inventory and turns. */
+/* gamestate(); -- save state */
+/* gamestate(true); -- restore state */
+static int
+nhl_gamestate(lua_State *L)
+{
+    int argc = lua_gettop(L);
+    boolean reststate = argc > 0 ? lua_toboolean(L, -1) : FALSE;
+    static struct obj *invent = NULL;
+    static long moves = 0;
+    static boolean stored = FALSE;
+
+    if (reststate && stored) {
+        /* restore game state */
+        gm.moves = moves;
+        gl.lastinvnr = 51;
+        while (gi.invent)
+            useupall(gi.invent);
+        while (invent) {
+            struct obj *otmp = invent;
+            long wornmask = otmp->owornmask;
+            otmp->owornmask = 0L;
+            extract_nobj(otmp, &invent);
+            addinv(otmp);
+            if (wornmask)
+                setworn(otmp, wornmask);
+        }
+        init_uhunger();
+        stored = FALSE;
+    } else {
+        /* store game state */
+        while (gi.invent) {
+            struct obj *otmp = gi.invent;
+            long wornmask = otmp->owornmask;
+            setnotworn(otmp);
+            freeinv(otmp);
+            otmp->nobj = invent;
+            otmp->owornmask = wornmask;
+            invent = otmp;
+        }
+        gl.lastinvnr = 51;
+        moves = gm.moves;
+        stored = TRUE;
+    }
+    update_inventory();
+    return 0;
+}
+
+RESTORE_WARNING_UNREACHABLE_CODE
 
 static const struct luaL_Reg nhl_functions[] = {
     {"test", nhl_test},
@@ -1283,7 +1640,11 @@ static const struct luaL_Reg nhl_functions[] = {
     {"pline", nhl_pline},
     {"verbalize", nhl_verbalize},
     {"menu", nhl_menu},
+    {"text", nhl_text},
     {"getlin", nhl_getlin},
+    {"eckey", nhl_get_cmd_key},
+    {"callback", nhl_callback},
+    {"gamestate", nhl_gamestate},
 
     {"makeplural", nhl_makeplural},
     {"makesingular", nhl_makesingular},
@@ -1300,6 +1661,7 @@ static const struct luaL_Reg nhl_functions[] = {
     {"dump_fmtstr", nhl_dump_fmtstr},
 #endif /* DUMPLOG */
     {"dnum_name", nhl_dnum_name},
+    {"variable", nhl_variable},
     {"stairways", nhl_stairways},
     {"pushkey", nhl_pushkey},
     {"doturn", nhl_doturn},
@@ -1357,6 +1719,8 @@ nhl_push_anything(lua_State *L, int anytype, void *src)
     return 1;
 }
 
+DISABLE_WARNING_UNREACHABLE_CODE
+
 static int
 nhl_meta_u_index(lua_State *L)
 {
@@ -1400,13 +1764,13 @@ nhl_meta_u_index(lua_State *L)
         }
 
     if (!strcmp(tkey, "inventory")) {
-        nhl_push_obj(L, g.invent);
+        nhl_push_obj(L, gi.invent);
         return 1;
     } else if (!strcmp(tkey, "role")) {
-        lua_pushstring(L, g.urole.name.m);
+        lua_pushstring(L, gu.urole.name.m);
         return 1;
     } else if (!strcmp(tkey, "moves")) {
-        lua_pushinteger(L, g.moves);
+        lua_pushinteger(L, gm.moves);
         return 1;
     } else if (!strcmp(tkey, "uhave_amulet")) {
         lua_pushinteger(L, u.uhave.amulet);
@@ -1414,9 +1778,13 @@ nhl_meta_u_index(lua_State *L)
     } else if (!strcmp(tkey, "depth")) {
         lua_pushinteger(L, depth(&u.uz));
         return 1;
+    } else if (!strcmp(tkey, "invocation_level")) {
+        lua_pushboolean(L, Invocation_lev(&u.uz));
+        return 1;
     }
 
     nhl_error(L, "Unknown u table index");
+    /*NOTREACHED*/
     return 0;
 }
 
@@ -1424,14 +1792,17 @@ static int
 nhl_meta_u_newindex(lua_State *L)
 {
     nhl_error(L, "Cannot set u table values");
+    /*NOTREACHED*/
     return 0;
 }
+
+RESTORE_WARNING_UNREACHABLE_CODE
 
 static int
 nhl_u_clear_inventory(lua_State *L UNUSED)
 {
-    while (g.invent)
-        useupall(g.invent);
+    while (gi.invent)
+        useupall(gi.invent);
     return 0;
 }
 
@@ -1587,7 +1958,7 @@ nhl_loadlua(lua_State *L, const char *fname)
         bufin -= ct, cnt += ct, ct = 0;
 
         while (cnt > 0) {
-            if ((nl = index(bufin, '\n')) != 0) {
+            if ((nl = strchr(bufin, '\n')) != 0) {
                 /* normal case, newline is present */
                 ct = (long) (nl - bufin + 1L); /* +1: keep the newline */
                 for (p = bufin; p <= nl; ++p)
@@ -1745,7 +2116,7 @@ get_lua_version(void)
 {
     nhl_sandbox_info sbi = {NHL_SB_VERSION, 0, 0, 0};
 
-    if (g.lua_ver[0] == 0) {
+    if (gl.lua_ver[0] == 0) {
         lua_State *L = nhl_init(&sbi);
 
         if (L) {
@@ -1772,25 +2143,25 @@ get_lua_version(void)
                     vs = LUA_VERSION, len = strlen(vs);
 #endif
             }
-            if (vs && len < sizeof g.lua_ver) {
+            if (vs && len < sizeof gl.lua_ver) {
                 if (!strncmpi(vs, "Lua", 3)) {
                     vs += 3;
                     if (*vs == '-' || *vs == ' ')
                         vs += 1;
                 }
-                Strcpy(g.lua_ver, vs);
+                Strcpy(gl.lua_ver, vs);
             }
         }
         nhl_done(L);
 #ifdef LUA_COPYRIGHT
-        if (sizeof LUA_COPYRIGHT <= sizeof g.lua_copyright)
-            Strcpy(g.lua_copyright, LUA_COPYRIGHT);
+        if (sizeof LUA_COPYRIGHT <= sizeof gl.lua_copyright)
+            Strcpy(gl.lua_copyright, LUA_COPYRIGHT);
 #endif
     }
-    return (const char *) g.lua_ver;
+    return (const char *) gl.lua_ver;
 }
 
-RESTORE_WARNINGS
+RESTORE_WARNING_CONDEXPR_IS_CONSTANT
 
 /***
  *** SANDBOX / HARDENING CODE
@@ -1844,6 +2215,8 @@ static struct e ct_base_iffy[] = {
 };
 
 /* NHL_BASE_UNSAFE - include only if required */
+/* TODO: if NHL_BASE_UNSAFE is ever used, we need to wrap lua_load with
+ * something to forbid mode=="b" */
 static struct e ct_base_unsafe[] = {
     {IFFLAG, "dofile"},
     {IFFLAG, "loadfile"},
@@ -1970,7 +2343,7 @@ start_luapat(void)
 
     /* load a pattern matching function */
     rv = luaL_loadstring(luapat,
-                "function matches(s,p) return not not string.match(s,p) end");
+                "function matches(s,p) return not not stringm.match(s,p) end");
     if (rv != LUA_OK) {
         panic("start_luapat: %d",rv);
     }
@@ -2297,6 +2670,8 @@ nhl_alloc(void *ud, void *ptr, size_t osize, size_t nsize)
     return re_alloc(ptr, nsize);
 }
 
+DISABLE_WARNING_UNREACHABLE_CODE
+
 static int
 nhl_panic(lua_State *L)
 {
@@ -2305,8 +2680,11 @@ nhl_panic(lua_State *L)
     if (msg == NULL)
         msg = "error object is not a string";
     panic("unprotected error in call to Lua API (%s)\n", msg);
+    /*NOTREACHED*/
     return 0; /* return to Lua to abort */
 }
+
+RESTORE_WARNING_UNREACHABLE_CODE
 
 /* called when lua issues a warning message; the text of the message
    is passed to us in pieces across multiple function calls */
@@ -2316,17 +2694,17 @@ nhl_warn(
     const char *msg_fragment,
     int to_be_continued) /* 0: last fragment; 1: more to come */
 {
-    size_t fraglen, buflen = strlen(g.lua_warnbuf);
+    size_t fraglen, buflen = strlen(gl.lua_warnbuf);
 
-    if (msg_fragment && buflen < sizeof g.lua_warnbuf - 1) {
+    if (msg_fragment && buflen < sizeof gl.lua_warnbuf - 1) {
         fraglen = strlen(msg_fragment);
-        if (buflen + fraglen > sizeof g.lua_warnbuf - 1)
-            fraglen = sizeof g.lua_warnbuf - 1 - buflen;
-        (void) strncat(g.lua_warnbuf, msg_fragment, fraglen);
+        if (buflen + fraglen > sizeof gl.lua_warnbuf - 1)
+            fraglen = sizeof gl.lua_warnbuf - 1 - buflen;
+        (void) strncat(gl.lua_warnbuf, msg_fragment, fraglen);
     }
     if (!to_be_continued) {
-        paniclog("[lua]", g.lua_warnbuf);
-        g.lua_warnbuf[0] = '\0';
+        paniclog("[lua]", gl.lua_warnbuf);
+        gl.lua_warnbuf[0] = '\0';
     }
 }
 
@@ -2372,7 +2750,7 @@ nhlL_newstate(nhl_sandbox_info *sbi)
 #endif
 
 #ifdef NHL_SANDBOX
-    if (sbi->steps || sbi->perpcall) {
+    if (nud && (sbi->steps || sbi->perpcall)) {
         if (sbi->steps && sbi->perpcall)
             impossible("steps and perpcall both non-zero");
         if (sbi->perpcall) {

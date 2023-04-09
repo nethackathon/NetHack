@@ -91,6 +91,7 @@ dungeon = {
       base = 20,
       range = 5,
       flags = { "mazelike", "hellish" },
+      lvlfill = "hellfill",
       alignment = "noalign",
       branches = {
          {
@@ -311,6 +312,17 @@ dungeon = {
          {
             name = "dummy",
             base = 6
+         },
+      }
+   },
+   {
+      name = "The Tutorial",
+      base = 1,
+      flags = { "mazelike", "unconnected" },
+      levels = {
+         {
+            name = "tut-1",
+            base = 1,
          },
       }
    },

@@ -68,7 +68,7 @@ amulet(void)
     if ((((amu = uamul) != 0 && amu->otyp == AMULET_OF_YENDOR)
          || ((amu = uwep) != 0 && amu->otyp == AMULET_OF_YENDOR))
         && !rn2(15)) {
-        for (ttmp = g.ftrap; ttmp; ttmp = ttmp->ntrap) {
+        for (ttmp = gf.ftrap; ttmp; ttmp = ttmp->ntrap) {
             if (ttmp->ttyp == MAGIC_PORTAL) {
                 int du = distu(ttmp->tx, ttmp->ty);
                 if (du <= 9)
@@ -83,7 +83,7 @@ amulet(void)
         }
     }
 
-    if (!g.context.no_of_wizards)
+    if (!gc.context.no_of_wizards)
         return;
     /* find Wizard, and wake him if necessary */
     for (mtmp = fmon; mtmp; mtmp = mtmp->nmon) {
@@ -241,7 +241,7 @@ target_on(int mask, struct monst *mtmp)
         else if ((otmp = on_ground(otyp)))
             return STRAT(STRAT_GROUND, otmp->ox, otmp->oy, mask);
         else if ((mtmp2 = other_mon_has_arti(mtmp, otyp)) != 0
-                 /* when seeking the Amulet, avoid targetting the Wizard
+                 /* when seeking the Amulet, avoid targeting the Wizard
                     or temple priests (to protect Moloch's high priest) */
                  && (otyp != AMULET_OF_YENDOR
                      || (!mtmp2->iswiz && !inhistemple(mtmp2))))
@@ -284,7 +284,7 @@ strategy(struct monst *mtmp)
         break;
     }
 
-    if (g.context.made_amulet)
+    if (gc.context.made_amulet)
         if ((strat = target_on(M3_WANTSAMUL, mtmp)) != STRAT_NONE)
             return strat;
 
@@ -328,7 +328,7 @@ choose_stairs(
         if (!stway) {
             /* no ladder either; look for branch stairs or ladder in any
                direction */
-            for (stway = g.stairs; stway; stway = stway->next)
+            for (stway = gs.stairs; stway; stway = stway->next)
                 if (stway->tolev.dnum != u.uz.dnum)
                     break;
             /* if no branch stairs/ladder, check for regular stairs in
@@ -496,16 +496,18 @@ clonewiz(void)
             (void) add_to_minv(mtmp2,
                                mksobj(FAKE_AMULET_OF_YENDOR, TRUE, FALSE));
         }
-        mtmp2->m_ap_type = M_AP_MONSTER;
-        mtmp2->mappearance = wizapp[rn2(SIZE(wizapp))];
+        if (!Protection_from_shape_changers) {
+            mtmp2->m_ap_type = M_AP_MONSTER;
+            mtmp2->mappearance = wizapp[rn2(SIZE(wizapp))];
+        }
         newsym(mtmp2->mx, mtmp2->my);
     }
 }
 
 /* also used by newcham() */
 int
-pick_nasty(int difcap) /* if non-zero, try to make difficulty be lower
-                          than this */
+pick_nasty(
+    int difcap) /* if non-zero, try to make difficulty be lower than this */
 {
     int alt, res = nasties[rn2(SIZE(nasties))];
 
@@ -525,7 +527,7 @@ pick_nasty(int difcap) /* if non-zero, try to make difficulty be lower
            master mind flayer -> mind flayer,
        but the substitutes are likely to be genocided too */
     alt = res;
-    if ((g.mvitals[res].mvflags & G_GENOD) != 0
+    if ((gm.mvitals[res].mvflags & G_GENOD) != 0
         || (difcap > 0 && mons[res].difficulty >= difcap)
          /* note: nasty() -> makemon() ignores G_HELL|G_NOHELL;
             arch-lich and master lich are both flagged as hell-only;
@@ -533,9 +535,9 @@ pick_nasty(int difcap) /* if non-zero, try to make difficulty be lower
             outside of Gehennom (unless the latter has been genocided) */
         || (mons[res].geno & (Inhell ? G_NOHELL : G_HELL)) != 0)
         alt = big_to_little(res);
-    if (alt != res && (g.mvitals[alt].mvflags & G_GENOD) == 0) {
+    if (alt != res && (gm.mvitals[alt].mvflags & G_GENOD) == 0) {
         const char *mnam = mons[alt].pmnames[NEUTRAL],
-                   *lastspace = rindex(mnam, ' ');
+                   *lastspace = strrchr(mnam, ' ');
 
         /* only non-juveniles can become alternate choice */
         if (strncmp(mnam, "baby ", 5)
@@ -683,7 +685,7 @@ resurrect(void)
     long elapsed;
     const char *verb;
 
-    if (!g.context.no_of_wizards) {
+    if (!gc.context.no_of_wizards) {
         /* make a new Wizard */
         verb = "kill";
         mtmp = makemon(&mons[PM_WIZARD_OF_YENDOR], u.ux, u.uy, MM_NOWAIT);
@@ -694,12 +696,12 @@ resurrect(void)
     } else {
         /* look for a migrating Wizard */
         verb = "elude";
-        mmtmp = &g.migrating_mons;
+        mmtmp = &gm.migrating_mons;
         while ((mtmp = *mmtmp) != 0) {
             if (mtmp->iswiz
                 /* if he has the Amulet, he won't bring it to you */
                 && !mon_has_amulet(mtmp)
-                && (elapsed = g.moves - mtmp->mlstmv) > 0L) {
+                && (elapsed = gm.moves - mtmp->mlstmv) > 0L) {
                 mon_catchup_elapsed_time(mtmp, elapsed);
                 if (elapsed >= LARGEST_INT)
                     elapsed = LARGEST_INT - 1;
@@ -738,6 +740,7 @@ resurrect(void)
         set_malign(mtmp);
         if (!Deaf) {
             pline("A voice booms out...");
+            SetVoice(mtmp, 0, 80, 0);
             verbalize("So thou thought thou couldst %s me, fool.", verb);
         }
     }
@@ -776,14 +779,14 @@ intervene(void)
 void
 wizdead(void)
 {
-    g.context.no_of_wizards--;
+    gc.context.no_of_wizards--;
     if (!u.uevent.udemigod) {
         u.uevent.udemigod = TRUE;
         u.udg_cnt = rn1(250, 50);
     }
 }
 
-const char *const random_insult[] = {
+static const char *const random_insult[] = {
     "antic",      "blackguard",   "caitiff",    "chucklehead",
     "coistrel",   "craven",       "cretin",     "cur",
     "dastard",    "demon fodder", "dimwit",     "dolt",
@@ -794,7 +797,7 @@ const char *const random_insult[] = {
     "wittol",     "worm",         "wretch",
 };
 
-const char *const random_malediction[] = {
+static const char *const random_malediction[] = {
     "Hell shall soon claim thy remains,", "I chortle at thee, thou pathetic",
     "Prepare to die, thou", "Resistance is useless,",
     "Surrender or die, thou", "There shall be no mercy, thou",
@@ -810,21 +813,26 @@ cuss(struct monst *mtmp)
     if (Deaf)
         return;
     if (mtmp->iswiz) {
-        if (!rn2(5)) /* typical bad guy action */
+        if (!rn2(5)) { /* typical bad guy action */
             pline("%s laughs fiendishly.", Monnam(mtmp));
-        else if (u.uhave.amulet && !rn2(SIZE(random_insult)))
+        } else if (u.uhave.amulet && !rn2(SIZE(random_insult))) {
+            SetVoice(mtmp, 0, 80, 0);
             verbalize("Relinquish the amulet, %s!",
                       random_insult[rn2(SIZE(random_insult))]);
-        else if (u.uhp < 5 && !rn2(2)) /* Panic */
+        } else if (u.uhp < 5 && !rn2(2)) { /* Panic */
+            SetVoice(mtmp, 0, 80, 0);
             verbalize(rn2(2) ? "Even now thy life force ebbs, %s!"
                              : "Savor thy breath, %s, it be thy last!",
                       random_insult[rn2(SIZE(random_insult))]);
-        else if (mtmp->mhp < 5 && !rn2(2)) /* Parthian shot */
+        } else if (mtmp->mhp < 5 && !rn2(2)) { /* Parthian shot */
+            SetVoice(mtmp, 0, 80, 0);
             verbalize(rn2(2) ? "I shall return." : "I'll be back.");
-        else
+        } else {
+            SetVoice(mtmp, 0, 80, 0);
             verbalize("%s %s!",
                       random_malediction[rn2(SIZE(random_malediction))],
                       random_insult[rn2(SIZE(random_insult))]);
+        }
     } else if (is_lminion(mtmp)
                && !(mtmp->isminion && EMIN(mtmp)->renegade)) {
         com_pager("angel_cuss"); /* TODO: the Hallucination msg */

@@ -80,7 +80,8 @@ struct egd {
     coordxy gdx, gdy;     /* goal of guard's walk */
     coordxy ogx, ogy;     /* guard's last position */
     d_level gdlevel;      /* level (& dungeon) guard was created in */
-    xint16 warncnt;       /* number of warnings to follow */
+    xint8 warncnt;        /* number of warnings to follow */
+    xint8 dropgoldcnt;    /* number of demands to drop gold */
     Bitfield(gddone, 1);  /* true iff guard has released player */
     Bitfield(witness, 2); /* the guard saw you do something */
     Bitfield(unused, 5);
@@ -121,8 +122,8 @@ struct eshk {
     long credit;          /* amount credited to customer */
     long debit;           /* amount of debt for using unpaid items */
     long loan;            /* shop-gold picked (part of debit) */
-    int shoptype;         /* the value of g.rooms[shoproom].rtype */
-    schar shoproom;       /* index in g.rooms; set by inshop() */
+    int shoptype;         /* the value of gr.rooms[shoproom].rtype */
+    schar shoproom;       /* index in gr.rooms; set by inshop() */
     schar unused;         /* to force alignment for stupid compilers */
     boolean following;    /* following customer since he owes us sth */
     boolean surcharge;    /* angry shk inflates prices */

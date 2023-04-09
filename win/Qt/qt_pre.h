@@ -9,13 +9,19 @@
 #undef C            // conflicts with Qt6 header
 #undef Invisible
 #undef Warning
-#undef index
 #undef msleep
-#undef rindex
 #undef wizard
-#undef yn
 #undef min
 #undef max
+
+#ifdef NOT_C99
+#ifdef NEED_INDEX
+#undef index
+#endif
+#ifdef NEED_RINDX
+#undef rindex
+#endif
+#endif
 
 #if defined(__cplusplus)
 
@@ -30,7 +36,7 @@
 #ifdef __clang__
 /* disable warnings for shadowed names; some of the Qt prototypes use
    placeholder argument names which conflict with nethack variables
-   ('g', 'u', a couple of others) */
+   ('u' and 'flags') */
 #pragma clang diagnostic ignored "-Wshadow"
 #elif defined(__GNUC__)
 #pragma GCC diagnostic ignored "-Wshadow"

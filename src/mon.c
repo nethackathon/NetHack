@@ -1,4 +1,4 @@
-/* NetHack 3.7	mon.c	$NHDT-Date: 1655065140 2022/06/12 20:19:00 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.436 $ */
+/* NetHack 3.7	mon.c	$NHDT-Date: 1679896593 2023/03/27 05:56:33 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.491 $ */
 /* Copyright (c) Stichting Mathematisch Centrum, Amsterdam, 1985. */
 /*-Copyright (c) Derek S. Ray, 2015. */
 /* NetHack may be freely redistributed.  See license for details. */
@@ -20,6 +20,8 @@ static void m_detach(struct monst *, struct permonst *);
 static void set_mon_min_mhpmax(struct monst *, int);
 static void lifesaved_monster(struct monst *);
 static boolean ok_to_obliterate(struct monst *);
+static void qst_guardians_respond(void);
+static void peacefuls_respond(struct monst *);
 static void m_restartcham(struct monst *);
 static boolean restrap(struct monst *);
 static int pick_animal(void);
@@ -32,7 +34,8 @@ static void pacify_guard(struct monst *);
 
 #define LEVEL_SPECIFIC_NOCORPSE(mdat) \
     (Is_rogue_level(&u.uz)            \
-     || (g.level.flags.graveyard && is_undead(mdat) && rn2(3)))
+     || !gl.level.flags.deathdrops    \
+     || (gl.level.flags.graveyard && is_undead(mdat) && rn2(3)))
 
 /* A specific combination of x_monnam flags for livelogging. The livelog
  * shouldn't show that you killed a hallucinatory monster and not what it
@@ -73,9 +76,9 @@ sanity_check_single_mon(
             mtmp->mnum = mndx;
         }
 #if 0   /*
-         * Gremlims don't obey the (mhpmax >= m_lev) rule so disable
+         * Gremlins don't obey the (mhpmax >= m_lev) rule so disable
          * this check, at least for the time being.  We could skip it
-         * when the cloned flag is set, but the original gremlim would
+         * when the cloned flag is set, but the original gremlin would
          * still be an issue.
          */
         /* check before DEADMONSTER() because dead monsters should still
@@ -99,7 +102,7 @@ sanity_check_single_mon(
 #endif
             return;
         }
-        if (chk_geno && (g.mvitals[mndx].mvflags & G_GENOD) != 0)
+        if (chk_geno && (gm.mvitals[mndx].mvflags & G_GENOD) != 0)
             impossible("genocided %s in play (%s)",
                         pmname(&mons[mndx], Mgender(mtmp)), msg);
         if (mtmp->mtame && !mtmp->mpeaceful)
@@ -153,13 +156,16 @@ sanity_check_single_mon(
         if (ceiling_hider(mptr)
             /* normally !accessible would be overridable with passes_walls,
                but not for hiding on the ceiling */
-            && (!has_ceiling(&u.uz) || !accessible(mx, my)))
+            && (!has_ceiling(&u.uz) ||
+                !(levl[mx][my].typ == POOL
+                  || levl[mx][my].typ == MOAT
+                  || levl[mx][my].typ == LAVAPOOL
+                  || accessible(mx, my))))
             impossible("ceiling hider hiding %s (%s)",
                        !has_ceiling(&u.uz) ? "without ceiling"
                                            : "in solid stone",
                        msg);
-        if (mtmp->mtrapped && (t = t_at(mx, my)) != 0
-            && !(t->ttyp == PIT || t->ttyp == SPIKED_PIT))
+        if (mtmp->mtrapped && (t = t_at(mx, my)) != 0 && !is_pit(t->ttyp))
             impossible("hiding while trapped in a non-pit (%s)", msg);
     } else if (M_AP_TYPE(mtmp) != M_AP_NOTHING) {
         boolean is_mimic = (mptr->mlet == S_MIMIC);
@@ -218,7 +224,7 @@ mon_sanity_check(void)
             if (x != u.ux || y != u.uy)
                 impossible("steed (%s) claims to be at <%d,%d>?",
                            fmt_ptr((genericptr_t) mtmp), x, y);
-        } else if (g.level.monsters[x][y] != mtmp) {
+        } else if (gl.level.monsters[x][y] != mtmp) {
             impossible("mon (%s) at <%d,%d> is not there!",
                        fmt_ptr((genericptr_t) mtmp), x, y);
         } else if (mtmp->wormno) {
@@ -228,7 +234,7 @@ mon_sanity_check(void)
 
     for (x = 1; x < COLNO; x++)
         for (y = 0; y < ROWNO; y++)
-            if ((mtmp = g.level.monsters[x][y]) != 0) {
+            if ((mtmp = gl.level.monsters[x][y]) != 0) {
                 for (m = fmon; m; m = m->nmon)
                     if (m == mtmp)
                         break;
@@ -245,7 +251,7 @@ mon_sanity_check(void)
                                mtmp->mx, mtmp->my, x, y);
             }
 
-    for (mtmp = g.migrating_mons; mtmp; mtmp = mtmp->nmon) {
+    for (mtmp = gm.migrating_mons; mtmp; mtmp = mtmp->nmon) {
         sanity_check_single_mon(mtmp, FALSE, "migr");
     }
 
@@ -259,7 +265,7 @@ int
 m_poisongas_ok(struct monst* mtmp)
 {
     int px, py;
-    boolean is_you = (mtmp == &g.youmonst);
+    boolean is_you = (mtmp == &gy.youmonst);
 
     /* Non living, non breathing, immune monsters are not concerned */
     if (nonliving(mtmp->data) || is_vampshifter(mtmp)
@@ -475,13 +481,13 @@ pm_to_cham(int mndx)
 }
 
 /* for deciding whether corpse will carry along full monster data */
-#define KEEPTRAITS(mon)                                                 \
-    ((mon)->isshk || (mon)->mtame || unique_corpstat((mon)->data)       \
-     || is_reviver((mon)->data)                                         \
-        /* normally quest leader will be unique, */                     \
-        /* but he or she might have been polymorphed  */                \
-     || (mon)->m_id == g.quest_status.leader_m_id                       \
-        /* special cancellation handling for these */                   \
+#define KEEPTRAITS(mon)                                                  \
+    ((mon)->isshk || (mon)->mtame || unique_corpstat((mon)->data)        \
+     || is_reviver((mon)->data)                                          \
+        /* normally quest leader will be unique, */                      \
+        /* but he or she might have been polymorphed  */                 \
+     || (mon)->m_id == gq.quest_status.leader_m_id                       \
+        /* special cancellation handling for these */                    \
      || (dmgtype((mon)->data, AD_SEDU) || dmgtype((mon)->data, AD_SSEX)))
 
 /* Creates a monster corpse, a "special" corpse, or nothing if it doesn't
@@ -582,7 +588,7 @@ make_corpse(struct monst *mtmp, unsigned int corpseflags)
     case PM_GLASS_GOLEM:
         num = d(2, 4); /* very low chance of creating all glass gems */
         while (num--)
-            obj = mksobj_at((LAST_GEM + rnd(NUM_GLASS_GEMS)),
+            obj = mksobj_at(FIRST_GLASS_GEM + rn2(NUM_GLASS_GEMS),
                             x, y, TRUE, FALSE);
         free_mgivenname(mtmp);
         break;
@@ -653,7 +659,7 @@ make_corpse(struct monst *mtmp, unsigned int corpseflags)
         return obj;
     default:
  default_1:
-        if (g.mvitals[mndx].mvflags & G_NOCORPSE) {
+        if (gm.mvitals[mndx].mvflags & G_NOCORPSE) {
             return (struct obj *) 0;
         } else {
             corpstatflags |= CORPSTAT_INIT;
@@ -677,7 +683,7 @@ make_corpse(struct monst *mtmp, unsigned int corpseflags)
 
     /* if polymorph or undead turning has killed this monster,
        prevent the same attack beam from hitting its corpse */
-    if (g.context.bypasses)
+    if (gc.context.bypasses)
         bypass_obj(obj);
 
     if (has_mgivenname(mtmp))
@@ -795,7 +801,7 @@ minliquid_core(struct monst* mtmp)
                    hero to create lava beneath a monster, so the !mon_moving
                    case is not expected to happen (and we haven't made a
                    player-against-monster variation of the message above) */
-                if (g.context.mon_moving)
+                if (gc.context.mon_moving)
                     mondead(mtmp); /* no corpse */
                 else
                     xkilled(mtmp, XKILL_NOMSG);
@@ -830,7 +836,7 @@ minliquid_core(struct monst* mtmp)
                     return 0;
             }
             if (cansee(mtmp->mx, mtmp->my)) {
-                if (g.context.mon_moving)
+                if (gc.context.mon_moving)
                     pline("%s drowns.", Monnam(mtmp));
                 else
                     /* hero used fire to melt ice that monster was on */
@@ -842,7 +848,7 @@ minliquid_core(struct monst* mtmp)
                 pline("%s sinks as %s rushes in and flushes you out.",
                       Monnam(mtmp), hliquid("water"));
             }
-            if (g.context.mon_moving)
+            if (gc.context.mon_moving)
                 mondied(mtmp); /* ok to leave corpse despite water */
             else
                 xkilled(mtmp, XKILL_NOMSG);
@@ -885,7 +891,7 @@ mcalcmove(
     else if (mon->mspeed == MFAST)
         mmove = (4 * mmove + 2) / 3;
 
-    if (mon == u.usteed && u.ugallop && g.context.mv) {
+    if (mon == u.usteed && u.ugallop && gc.context.mv) {
         /* increase movement by a factor of 1.5; also increase variance of
            movement speed (if it's naturally 24, we don't want it to always
            become 36) */
@@ -923,7 +929,7 @@ m_calcdistress(struct monst *mtmp)
        to end up in water or lava; note: when not in liquid they regen,
        shape-shift, timeout temporary maladies just like other monsters */
     if (mtmp->data->mmove == 0) {
-        if (g.vision_full_recalc)
+        if (gv.vision_full_recalc)
             vision_recalc(0);
         if (minliquid(mtmp))
             return;
@@ -959,10 +965,10 @@ movemon_singlemon(struct monst *mtmp)
     if (u.utotype
 #ifdef SAFERHANGUP
         /* or if the program has lost contact with the user */
-        || g.program_state.done_hup
+        || gp.program_state.done_hup
 #endif
         ) {
-        g.somebody_can_move = FALSE;
+        gs.somebody_can_move = FALSE;
         return TRUE;
     }
 
@@ -974,9 +980,9 @@ movemon_singlemon(struct monst *mtmp)
        mon->isgd flag so that dmonsfree() will get rid of mon) */
     if (mtmp->isgd && !mtmp->mx && !(mtmp->mstate & MON_MIGRATING)) {
         /* parked at <0,0>; eventually isgd should get set to false */
-        if (g.moves > mtmp->mlstmv) {
+        if (gm.moves > mtmp->mlstmv) {
             (void) gd_move(mtmp);
-            mtmp->mlstmv = g.moves;
+            mtmp->mlstmv = gm.moves;
         }
         return FALSE;
     }
@@ -993,13 +999,13 @@ movemon_singlemon(struct monst *mtmp)
 
     mtmp->movement -= NORMAL_SPEED;
     if (mtmp->movement >= NORMAL_SPEED)
-        g.somebody_can_move = TRUE;
+        gs.somebody_can_move = TRUE;
 
-    if (g.vision_full_recalc)
+    if (gv.vision_full_recalc)
         vision_recalc(0); /* vision! */
 
     /* reset obj bypasses before next monster moves */
-    if (g.context.bypasses)
+    if (gc.context.bypasses)
         clear_bypasses();
     clear_splitobjs();
     if (minliquid(mtmp))
@@ -1009,11 +1015,18 @@ movemon_singlemon(struct monst *mtmp)
     if (mtmp->misc_worn_check & I_SPECIAL) {
         long oldworn;
 
-        mtmp->misc_worn_check &= ~I_SPECIAL;
-        oldworn = mtmp->misc_worn_check;
-        m_dowear(mtmp, FALSE);
-        if (mtmp->misc_worn_check != oldworn || !mtmp->mcanmove)
-            return FALSE;
+        /* hostiles only try to equip things if they think hero isn't
+         * nearby; if they think hero is nearby, leave the flag intact so
+         * that it can be checked again on subsequent moves until the hero
+         * is perceived to be farther away. */
+        if (mtmp->mpeaceful || mtmp->mtame
+            || dist2(mtmp->mx, mtmp->my, mtmp->mux, mtmp->muy) > (3 * 3)) {
+            mtmp->misc_worn_check &= ~I_SPECIAL;
+            oldworn = mtmp->misc_worn_check;
+            m_dowear(mtmp, FALSE);
+            if (mtmp->misc_worn_check != oldworn || !mtmp->mcanmove)
+                return FALSE; /* is spending this turn equipping */
+        }
     }
 
     if (is_hider(mtmp->data)) {
@@ -1046,7 +1059,7 @@ movemon_singlemon(struct monst *mtmp)
          *  have died if it returns 1.
          */
         if (cansee(mtmp->mx, mtmp->my)
-            && (distu(mtmp->mx, mtmp->my) <= BOLT_LIM * BOLT_LIM)
+            && (mdistu(mtmp) <= BOLT_LIM * BOLT_LIM)
             && fightm(mtmp))
             return FALSE; /* mon might have died */
     }
@@ -1058,14 +1071,14 @@ movemon_singlemon(struct monst *mtmp)
 int
 movemon(void)
 {
-    g.somebody_can_move = FALSE;
+    gs.somebody_can_move = FALSE;
 
     iter_mons_safe(movemon_singlemon);
 
     if (any_light_source())
-        g.vision_full_recalc = 1; /* in case a mon moved with a light source */
+        gv.vision_full_recalc = 1; /* in case a mon moved with a light source */
     /* reset obj bypasses after last monster has moved */
-    if (g.context.bypasses)
+    if (gc.context.bypasses)
         clear_bypasses();
     clear_splitobjs();
     /* remove dead monsters; dead vault guard will be left at <0,0>
@@ -1076,10 +1089,10 @@ movemon(void)
     if (u.utotype) {
         deferred_goto();
         /* changed levels, so these monsters are dormant */
-        g.somebody_can_move = FALSE;
+        gs.somebody_can_move = FALSE;
     }
 
-    return g.somebody_can_move;
+    return gs.somebody_can_move;
 }
 
 /* dispose of contents of an eaten container; used for pets and other mons */
@@ -1118,6 +1131,73 @@ meatbox(struct monst *mon, struct obj *otmp)
     (ofood(obj) && (touch_petrifies(&mons[(obj)->corpsenm]) \
                     || (obj)->corpsenm == PM_MEDUSA))
 
+/* monster consumes an object.
+
+   monster may die, polymorph, grow up, heal, etc; meating is not changed.
+   object is extracted from any linked list and freed. */
+void
+m_consume_obj(struct monst *mtmp, struct obj *otmp)
+{
+    boolean ispet = mtmp->mtame;
+
+    /* non-pet: Heal up to the object's weight in hp */
+    if (!ispet && mtmp->mhp < mtmp->mhpmax) {
+        mtmp->mhp += objects[otmp->otyp].oc_weight;
+        if (mtmp->mhp > mtmp->mhpmax)
+            mtmp->mhp = mtmp->mhpmax;
+    }
+    if (Has_contents(otmp))
+        meatbox(mtmp, otmp);
+    if (otmp == uball) {
+        unpunish();
+        delobj(otmp);
+    } else if (otmp == uchain) {
+        unpunish(); /* frees uchain */
+    } else {
+        boolean deadmimic, slimer;
+        int poly, grow, heal, eyes, mstone, vis = canseemon(mtmp);
+        int corpsenm = (otmp->otyp == CORPSE ? otmp->corpsenm : NON_PM);
+
+        deadmimic = (otmp->otyp == CORPSE && (otmp->corpsenm == PM_SMALL_MIMIC
+                                             || otmp->corpsenm == PM_LARGE_MIMIC
+                                             || otmp->corpsenm == PM_GIANT_MIMIC));
+        slimer = (otmp->otyp == GLOB_OF_GREEN_SLIME);
+        poly = polyfodder(otmp);
+        grow = mlevelgain(otmp);
+        heal = mhealup(otmp);
+        eyes = (otmp->otyp == CARROT);
+        mstone = mstoning(otmp);
+        delobj(otmp); /* munch */
+        if (poly || slimer) {
+            struct permonst *ptr = slimer ? &mons[PM_GREEN_SLIME] : 0;
+
+            (void) newcham(mtmp, ptr, vis ? NC_SHOW_MSG : NO_NC_FLAGS);
+        }
+        if (grow) {
+            if ((ispet && (int) mtmp->m_lev < (int) mtmp->data->mlevel + 15)
+                || !ispet)
+                (void) grow_up(mtmp, (struct monst *) 0);
+        }
+        if (mstone) {
+            if (poly_when_stoned(mtmp->data)) {
+                mon_to_stone(mtmp);
+            } else if (!resists_ston(mtmp)) {
+                if (vis)
+                    pline("%s turns to stone!", Monnam(mtmp));
+                monstone(mtmp);
+            }
+        }
+        if (heal)
+            mtmp->mhp = mtmp->mhpmax;
+        if ((eyes || heal) && !mtmp->mcansee)
+            mcureblindness(mtmp, canseemon(mtmp));
+        if (ispet && deadmimic)
+            quickmimic(mtmp);
+        if (corpsenm != NON_PM)
+            mon_givit(mtmp, &mons[corpsenm]);
+    }
+}
+
 /*
  * Maybe eat a metallic object (not just gold).
  * Return value: 0 => nothing happened, 1 => monster ate something,
@@ -1129,16 +1209,15 @@ int
 meatmetal(struct monst *mtmp)
 {
     struct obj *otmp;
-    struct permonst *ptr;
     char *otmpname;
-    int poly, grow, heal, mstone, vis = canseemon(mtmp);
+    int vis = canseemon(mtmp);
 
     /* If a pet, eating is handled separately, in dog.c */
     if (mtmp->mtame)
         return 0;
 
     /* Eats topmost metal object if it is there */
-    for (otmp = g.level.objects[mtmp->mx][mtmp->my]; otmp;
+    for (otmp = gl.level.objects[mtmp->mx][mtmp->my]; otmp;
          otmp = otmp->nexthere) {
         /* Don't eat indigestible/choking/inappropriate objects */
         if ((mtmp->data == &mons[PM_RUST_MONSTER] && !is_rustprone(otmp))
@@ -1172,60 +1251,15 @@ meatmetal(struct monst *mtmp)
                     if (Verbose(1, meatmetal3))
                         pline("%s eats %s!", Monnam(mtmp), otmpname);
                 } else {
-                    if (Verbose(1, meatmetal4))
+                    if (Verbose(1, meatmetal4)) {
+                        Soundeffect(se_crunching_sound, 50);
                         You_hear("a crunching sound.");
+                    }
                 }
                 mtmp->meating = otmp->owt / 2 + 1;
-                /* Heal up to the object's weight in hp */
-                if (mtmp->mhp < mtmp->mhpmax) {
-                    mtmp->mhp += objects[otmp->otyp].oc_weight;
-                    if (mtmp->mhp > mtmp->mhpmax)
-                        mtmp->mhp = mtmp->mhpmax;
-                }
-                /* Currently there shouldn't be any metal object with
-                  contents, but just in case... */
-                if (Has_contents(otmp))
-                    meatbox(mtmp, otmp);
-                if (otmp == uball) {
-                    unpunish();
-                    delobj(otmp);
-                } else if (otmp == uchain) {
-                    unpunish(); /* frees uchain */
-                } else {
-                    /* these can occur via eating metal if it's a tin
-                       [can't be slimed; that could only happen via glob] */
-                    poly = polyfodder(otmp);
-                    grow = mlevelgain(otmp);
-                    heal = mhealup(otmp);
-                    mstone = mstoning(otmp);
-                    delobj(otmp);
-                    ptr = mtmp->data;
-                    if (poly) {
-                        if (newcham(mtmp, (struct permonst *) 0,
-                                    vis ? NC_SHOW_MSG : NO_NC_FLAGS))
-                            ptr = mtmp->data;
-                    } else if (grow) {
-                        ptr = grow_up(mtmp, (struct monst *) 0);
-                    } else if (mstone) {
-                        if (poly_when_stoned(ptr)) {
-                            mon_to_stone(mtmp);
-                            ptr = mtmp->data;
-                        } else if (!resists_ston(mtmp)) {
-                            if (vis)
-                                pline("%s turns to stone!", Monnam(mtmp));
-                            monstone(mtmp);
-                            /* might be life-saved if had a previous shape
-                               which was capable to putting on an amulet */
-                            if (DEADMONSTER(mtmp))
-                                ptr = (struct permonst *) 0;
-                        }
-                    } else if (heal) {
-                        mtmp->mhp = mtmp->mhpmax;
-                        mcureblindness(mtmp, canseemon(mtmp));
-                    }
-                    if (!ptr)
-                        return 2; /* it died */
-                }
+                m_consume_obj(mtmp, otmp);
+                if (DEADMONSTER(mtmp))
+                    return 2;
                 /* Left behind a pile? */
                 if (rnd(25) < 3)
                     (void) mksobj_at(ROCK, mtmp->mx, mtmp->my, TRUE, FALSE);
@@ -1243,7 +1277,7 @@ meatobj(struct monst* mtmp) /* for gelatinous cubes */
 {
     struct obj *otmp, *otmp2;
     struct permonst *ptr, *original_ptr = mtmp->data;
-    int poly, grow, heal, eyes, count = 0, ecount = 0, vis = canseemon(mtmp);
+    int count = 0, ecount = 0;
     char buf[BUFSZ], *otmpname;
 
     buf[0] = '\0';
@@ -1254,7 +1288,7 @@ meatobj(struct monst* mtmp) /* for gelatinous cubes */
     /* eat organic objects, including cloth and wood, if present;
        engulf others, except huge rocks and metal attached to player
        [despite comment at top, doesn't assume that eater is a g-cube] */
-    for (otmp = g.level.objects[mtmp->mx][mtmp->my]; otmp; otmp = otmp2) {
+    for (otmp = gl.level.objects[mtmp->mx][mtmp->my]; otmp; otmp = otmp2) {
         otmp2 = otmp->nexthere;
 
         /* avoid special items; once hero picks them up, they'll cease
@@ -1328,41 +1362,14 @@ meatobj(struct monst* mtmp) /* for gelatinous cubes */
                 if (otmp->oclass == SCROLL_CLASS
                     && objdescr_is(otmp, "YUM YUM"))
                     pline("Yum%c", otmp->blessed ? '!' : '.');
-                if (otmp->otyp == CORPSE)
-                    mon_givit(mtmp, &mons[otmp->corpsenm]);
             } else {
+                Soundeffect(se_slurping_sound, 30);
                 if (Verbose(2, meatobj2))
                     You_hear("a slurping sound.");
             }
-            /* Heal up to the object's weight in hp */
-            if (mtmp->mhp < mtmp->mhpmax) {
-                mtmp->mhp += objects[otmp->otyp].oc_weight;
-                if (mtmp->mhp > mtmp->mhpmax)
-                    mtmp->mhp = mtmp->mhpmax;
-            }
-            if (Has_contents(otmp))
-                meatbox(mtmp, otmp);
-            /* possibility of being turned to stone or into slime can't
-               reach here (don't touch for cockatrice corpse, engulf rather
-               than eat for tin, cockatrice egg, or glob of green slime) */
-            poly = polyfodder(otmp);
-            grow = mlevelgain(otmp);
-            heal = mhealup(otmp);
-            eyes = (otmp->otyp == CARROT);
-            delobj(otmp); /* munch */
-            ptr = mtmp->data;
-            if (poly) {
-                if (newcham(mtmp, (struct permonst *) 0,
-                            vis ? NC_SHOW_MSG : NO_NC_FLAGS))
-                    ptr = mtmp->data;
-            } else if (grow) {
-                ptr = grow_up(mtmp, (struct monst *) 0);
-            } else if (heal) {
-                mtmp->mhp = mtmp->mhpmax;
-            }
-            if ((eyes || heal) && !mtmp->mcansee)
-                mcureblindness(mtmp, canseemon(mtmp));
+            m_consume_obj(mtmp, otmp);
             /* in case it polymorphed or died */
+            ptr = mtmp->data;
             if (ptr != original_ptr)
                 return !ptr ? 2 : 1;
         }
@@ -1390,7 +1397,6 @@ meatcorpse(
 {
     struct obj *otmp;
     struct permonst *ptr, *original_ptr = mtmp->data, *corpsepm;
-    boolean poly, grow, heal, eyes = FALSE, vis = canseemon(mtmp);
     coordxy x = mtmp->mx, y = mtmp->my;
 
     /* if a pet, eating is handled separately, in dog.c */
@@ -1433,32 +1439,14 @@ meatcorpse(
             if (Verbose(2, meatcorpse1))
                 pline("%s eats %s!", Monnam(mtmp), otmpname);
         } else {
+            Soundeffect(se_masticating_sound, 50);
             if (Verbose(2, meatcorpse2))
                 You_hear("a masticating sound.");
         }
 
-        mon_givit(mtmp, &mons[otmp->corpsenm]);
-
-        /* [should include quickmimic but can't handle that unless this
-           gets changed to set mtmp->meating] */
-        poly = polyfodder(otmp);
-        grow = mlevelgain(otmp);
-        heal = mhealup(otmp);
-        eyes = (otmp->otyp == CARROT); /*[always false since not a corpse]*/
-        ptr = original_ptr;
-        delobj(otmp);
-        if (poly) {
-            if (newcham(mtmp, (struct permonst *) 0,
-                        vis ? NC_SHOW_MSG : NO_NC_FLAGS))
-                ptr = mtmp->data;
-        } else if (grow) {
-            ptr = grow_up(mtmp, (struct monst *) 0);
-        } else if (heal) {
-            mtmp->mhp = mtmp->mhpmax;
-        }
-        if ((eyes || heal) && !mtmp->mcansee)
-            mcureblindness(mtmp, canseemon(mtmp));
+        m_consume_obj(mtmp, otmp);
         /* in case it polymorphed or died */
+        ptr = mtmp->data;
         if (ptr != original_ptr)
             return !ptr ? 2 : 1;
 
@@ -1471,7 +1459,62 @@ meatcorpse(
     return 0;
 }
 
-DISABLE_WARNING_FORMAT_NONLITERAL
+/* give monster property prop */
+void
+mon_give_prop(struct monst *mtmp, int prop)
+{
+    const char *msg = NULL;
+    unsigned short intrinsic = 0; /* MR_* constant */
+
+    /* Pets don't have all the fields that the hero does, so they can't get all
+       the same intrinsics. If it happens to choose strength gain or teleport
+       control or whatever, ignore it. */
+    switch (prop) {
+    case FIRE_RES:
+        intrinsic = MR_FIRE;
+        msg = "%s shivers slightly.";
+        break;
+    case COLD_RES:
+        intrinsic = MR_COLD;
+        msg = "%s looks quite warm.";
+        break;
+    case SLEEP_RES:
+        intrinsic = MR_SLEEP;
+        msg = "%s looks wide awake.";
+        break;
+    case DISINT_RES:
+        intrinsic = MR_DISINT;
+        msg = "%s looks very firm.";
+        break;
+    case SHOCK_RES:
+        intrinsic = MR_ELEC;
+        msg = "%s crackles with static electricity.";
+        break;
+    case POISON_RES:
+        intrinsic = MR_POISON;
+        msg = "%s looks healthy.";
+        break;
+    default:
+        return; /* can't give it */
+        break;
+    }
+
+    /* Don't give message if it already had this property intrinsically, but
+       still do grant the intrinsic if it only had it from mresists.
+       Do print the message if it only had this property extrinsically, which
+       is why mon_resistancebits isn't used here. */
+    if ((mtmp->data->mresists | mtmp->mintrinsics) & intrinsic)
+        msg = (const char *) 0;
+
+    if (intrinsic)
+        mtmp->mintrinsics |= intrinsic;
+
+    if (canseemon(mtmp) && msg) {
+        DISABLE_WARNING_FORMAT_NONLITERAL
+        pline(msg, Monnam(mtmp));
+        RESTORE_WARNING_FORMAT_NONLITERAL
+    }
+}
 
 /* Maybe give an intrinsic to monster from eating corpse that confers it. */
 void
@@ -1479,15 +1522,13 @@ mon_givit(struct monst *mtmp, struct permonst *ptr)
 {
     int prop = corpse_intrinsic(ptr);
     boolean vis = canseemon(mtmp);
-    const char *msg = NULL;
-    unsigned short intrinsic = 0; /* MR_* constant */
 
     if (ptr == &mons[PM_STALKER]) {
         /*
          * Invisible stalker isn't flagged as conferring invisibility
          * so prop is 0.  For hero, eating a stalker corpse confers
          * temporary invisibility if hero is visible.  When already
-         * invisible, if confers permanent invisibilty and also
+         * invisible, if confers permanent invisibility and also
          * permanent see invisible.  For monsters, only permanent
          * invisibility is possible; temporary invisibility and see
          * invisible aren't implemented for them.
@@ -1519,53 +1560,8 @@ mon_givit(struct monst *mtmp, struct permonst *ptr)
     if (!should_givit(prop, ptr))
         return; /* failed die roll */
 
-    /* Pets don't have all the fields that the hero does, so they can't get all
-       the same intrinsics. If it happens to choose strength gain or teleport
-       control or whatever, ignore it. */
-    switch (prop) {
-    case FIRE_RES:
-        intrinsic = MR_FIRE;
-        msg = "%s shivers slightly.";
-        break;
-    case COLD_RES:
-        intrinsic = MR_COLD;
-        msg = "%s looks quite warm.";
-        break;
-    case SLEEP_RES:
-        intrinsic = MR_SLEEP;
-        msg = "%s looks wide awake.";
-        break;
-    case DISINT_RES:
-        intrinsic = MR_DISINT;
-        msg = "%s looks very firm.";
-        break;
-    case SHOCK_RES:
-        intrinsic = MR_ELEC;
-        msg = "%s crackles with static electricity.";
-        break;
-    case POISON_RES:
-        intrinsic = MR_POISON;
-        msg = "%s looks healthy.";
-        break;
-    default:
-        break;
-    }
-
-    /* Don't give message if it already had this property intrinsically, but
-       still do grant the intrinsic if it only had it from mresists.
-       Do print the message if it only had this property extrinsically, which
-       is why mon_resistancebits isn't used here. */
-    if ((mtmp->data->mresists | mtmp->mintrinsics) & intrinsic)
-        msg = (const char *) 0;
-
-    if (intrinsic)
-        mtmp->mintrinsics |= intrinsic;
-
-    if (vis && msg)
-        pline(msg, Monnam(mtmp));
+    mon_give_prop(mtmp, prop);
 }
-
-RESTORE_WARNING_FORMAT_NONLITERAL
 
 void
 mpickgold(register struct monst* mtmp)
@@ -1586,8 +1582,9 @@ mpickgold(register struct monst* mtmp)
     }
 }
 
+/* monster picks up one item stack from the map location they are at */
 boolean
-mpickstuff(struct monst *mtmp, const char *str)
+mpickstuff(struct monst *mtmp)
 {
     register struct obj *otmp, *otmp2, *otmp3;
     int carryamt = 0;
@@ -1596,7 +1593,15 @@ mpickstuff(struct monst *mtmp, const char *str)
     if (mtmp->isshk && inhishop(mtmp))
         return FALSE;
 
-    for (otmp = g.level.objects[mtmp->mx][mtmp->my]; otmp; otmp = otmp2) {
+    /* non-tame monsters normally don't go shopping */
+    if (!mtmp->mtame && *in_rooms(mtmp->mx, mtmp->my, SHOPBASE) && rn2(25))
+        return FALSE;
+
+    /* item in a pool, but monster can't swim */
+    if (!could_reach_item(mtmp, mtmp->mx, mtmp->my))
+        return FALSE;
+
+    for (otmp = gl.level.objects[mtmp->mx][mtmp->my]; otmp; otmp = otmp2) {
         otmp2 = otmp->nexthere;
 
         /* avoid special items; once hero picks them up, they'll cease
@@ -1605,20 +1610,18 @@ mpickstuff(struct monst *mtmp, const char *str)
             continue;
 
         /* Nymphs take everything.  Most monsters don't pick up corpses. */
-        if (!str ? searches_for_item(mtmp, otmp)
-                 : !!(index(str, otmp->oclass))) {
+        if (mon_would_take_item(mtmp, otmp)) {
+
             if (otmp->otyp == CORPSE && mtmp->data->mlet != S_NYMPH
                 /* let a handful of corpse types thru to can_carry() */
                 && !touch_petrifies(&mons[otmp->corpsenm])
                 && otmp->corpsenm != PM_LIZARD
                 && !acidic(&mons[otmp->corpsenm]))
                 continue;
-            if (!touch_artifact(otmp, mtmp))
+            if (!can_touch_safely(mtmp, otmp))
                 continue;
             carryamt = can_carry(mtmp, otmp);
             if (carryamt == 0)
-                continue;
-            if (is_pool(mtmp->mx, mtmp->my))
                 continue;
             /* handle cases where the critter can only get some */
             otmp3 = otmp;
@@ -1636,7 +1639,8 @@ mpickstuff(struct monst *mtmp, const char *str)
             }
             obj_extract_self(otmp3);      /* remove from floor */
             (void) mpickobj(mtmp, otmp3); /* may merge and free otmp3 */
-            m_dowear(mtmp, FALSE);
+            /* let them try and equip it on the next turn */
+            check_gear_next_turn(mtmp);
             newsym(mtmp->mx, mtmp->my);
             return TRUE; /* pick only one object */
         }
@@ -1688,6 +1692,26 @@ max_mon_load(struct monst* mtmp)
     return (int) maxload;
 }
 
+/* can monster touch object safely? */
+boolean
+can_touch_safely(struct monst *mtmp, struct obj *otmp)
+{
+    int otyp = otmp->otyp;
+    struct permonst *mdat = mtmp->data;
+
+    if (otyp == CORPSE && touch_petrifies(&mons[otmp->corpsenm])
+        && !(mtmp->misc_worn_check & W_ARMG) && !resists_ston(mtmp))
+        return FALSE;
+    if (otyp == CORPSE && is_rider(&mons[otmp->corpsenm]))
+        return FALSE;
+    if (objects[otyp].oc_material == SILVER && mon_hates_silver(mtmp)
+        && (otyp != BELL_OF_OPENING || !is_covetous(mdat)))
+        return FALSE;
+    if (!touch_artifact(otmp, mtmp))
+        return FALSE;
+    return TRUE;
+}
+
 /* for restricting monsters' object-pickup.
  *
  * to support the new pet behavior, this now returns the max # of objects
@@ -1697,7 +1721,7 @@ max_mon_load(struct monst* mtmp)
  * this will probably cause very amusing behavior with pets and gold coins.
  *
  * TODO: allow picking up 2-N objects from a pile of N based on weight.
- *       Change from 'int' to 'long' to accomate big stacks of gold.
+ *       Change from 'int' to 'long' to accommodate big stacks of gold.
  *       Right now we fake it by reporting a partial quantity, but the
  *       likesgold handling m_move results in picking up the whole stack.
  */
@@ -1711,17 +1735,11 @@ can_carry(struct monst* mtmp, struct obj* otmp)
     if (notake(mdat))
         return 0; /* can't carry anything */
 
-    if (otyp == CORPSE && touch_petrifies(&mons[otmp->corpsenm])
-        && !(mtmp->misc_worn_check & W_ARMG) && !resists_ston(mtmp))
-        return 0;
-    if (otyp == CORPSE && is_rider(&mons[otmp->corpsenm]))
-        return 0;
-    if (objects[otyp].oc_material == SILVER && mon_hates_silver(mtmp)
-        && (otyp != BELL_OF_OPENING || !is_covetous(mdat)))
+    if (!can_touch_safely(mtmp, otmp))
         return 0;
 
     /* hostile monsters who like gold will pick up the whole stack;
-       tame mosnters with hands will pick up the partial stack */
+       tame monsters with hands will pick up the partial stack */
     iquan = (otmp->quan > (long) LARGEST_INT)
                ? 20000 + rn2(LARGEST_INT - 20000 + 1)
                : (int) otmp->quan;
@@ -1842,6 +1860,16 @@ mon_allowflags(struct monst* mtmp)
     return allowflags;
 }
 
+/* return TRUE if monster is up in the air/on the ceiling */
+boolean
+m_in_air(struct monst *mtmp)
+{
+    return (is_flyer(mtmp->data)
+            || is_floater(mtmp->data)
+            || (is_clinger(mtmp->data)
+                && has_ceiling(&u.uz) && mtmp->mundetected));
+}
+
 /* return number of acceptable neighbour positions */
 int
 mfndpos(
@@ -1869,11 +1897,11 @@ mfndpos(
 
     nodiag = NODIAG(mdat - mons);
     wantpool = (mdat->mlet == S_EEL);
-    poolok = ((!Is_waterlevel(&u.uz) && !grounded(mdat))
+    poolok = ((!Is_waterlevel(&u.uz) && m_in_air(mon))
               || (is_swimmer(mdat) && !wantpool));
     /* note: floating eye is the only is_floater() so this could be
        simplified, but then adding another floater would be error prone */
-    lavaok = (!grounded(mdat) || likes_lava(mdat));
+    lavaok = (m_in_air(mon) || likes_lava(mdat));
     if (mdat == &mons[PM_FLOATING_EYE]) /* prefers to avoid heat */
         lavaok = FALSE;
     thrudoor = ((flag & (ALLOW_WALL | BUSTDOOR)) != 0L);
@@ -1921,6 +1949,12 @@ mfndpos(
                 && !((flag & ALLOW_WALL) && may_passwall(nx, ny))
                 && !((IS_TREE(ntyp) ? treeok : rockok) && may_dig(nx, ny)))
                 continue;
+            /* intelligent peacefuls avoid digging shop/temple walls */
+            if (IS_ROCK(ntyp) && rockok
+                && !mindless(mon->data) && (mon->mpeaceful || mon->mtame)
+                && (*in_rooms(nx, ny, TEMPLE) || *in_rooms(nx, ny, SHOPBASE))
+                && !(*in_rooms(x, y, TEMPLE) || *in_rooms(x, y, SHOPBASE)))
+                continue;
             if (IS_WATERWALL(ntyp) && !is_swimmer(mdat))
                 continue;
             /* KMH -- Added iron bars */
@@ -1955,6 +1989,8 @@ mfndpos(
                        but can attack that way */
                     || (m_at(x, ny) && m_at(nx, y) && worm_cross(x, y, nx, ny)
                         && !m_at(nx, ny) && (nx != u.ux || ny != u.uy))))
+                continue;
+            if ((!lavaok || !(flag & ALLOW_WALL)) && ntyp == LAVAWALL)
                 continue;
             if ((poolok || is_pool(nx, ny) == wantpool)
                 && (lavaok || !is_lava(nx, ny))) {
@@ -2017,7 +2053,7 @@ mfndpos(
                     }
                     /* Note: ALLOW_SANCT only prevents movement, not
                        attack, into a temple. */
-                    if (g.level.flags.has_temple && *in_rooms(nx, ny, TEMPLE)
+                    if (gl.level.flags.has_temple && *in_rooms(nx, ny, TEMPLE)
                         && !*in_rooms(x, y, TEMPLE)
                         && in_your_sanctuary((struct monst *) 0, nx, ny)) {
                         if (!(flag & ALLOW_SANCT))
@@ -2108,7 +2144,7 @@ mm_2way_aggression(struct monst *magr, struct monst *mdef)
 
 /* Monster against monster special attacks; for the specified monster
    combinations, this allows one monster to attack another adjacent one
-   in the absence of Conflict.  There is no provision for targetting
+   in the absence of Conflict.  There is no provision for targeting
    other monsters; just hand to hand fighting when they happen to be
    next to each other. */
 static long
@@ -2211,8 +2247,8 @@ replmon(struct monst *mtmp, struct monst *mtmp2)
     }
     mtmp->minvent = 0;
     /* before relmon(mtmp), because it could clear polearm.hitmon */
-    if (g.context.polearm.hitmon == mtmp)
-        g.context.polearm.hitmon = mtmp2;
+    if (gc.context.polearm.hitmon == mtmp)
+        gc.context.polearm.hitmon = mtmp2;
 
     /* remove the old monster from the map and from `fmon' list */
     relmon(mtmp, (struct monst **) 0);
@@ -2247,7 +2283,7 @@ replmon(struct monst *mtmp, struct monst *mtmp2)
 void
 relmon(
     struct monst *mon,
-    struct monst **monst_list) /* &g.migrating_mons or &g.mydogs or null */
+    struct monst **monst_list) /* &gm.migrating_mons or &gm.mydogs or null */
 {
     if (!fmon)
         panic("relmon: no fmon available.");
@@ -2271,7 +2307,7 @@ relmon(
     }
 
     if (monst_list) {
-        /* insert into g.mydogs or g.migrating_mons */
+        /* insert into gm.mydogs or gm.migrating_mons */
         mon->nmon = *monst_list;
         *monst_list = mon;
     } else {
@@ -2328,18 +2364,18 @@ dealloc_mextra(struct monst* m)
 
     if (x) {
         if (x->mgivenname)
-            free((genericptr_t) x->mgivenname);
+            free((genericptr_t) x->mgivenname), x->mgivenname = 0;
         if (x->egd)
-            free((genericptr_t) x->egd);
+            free((genericptr_t) x->egd), x->egd = 0;
         if (x->epri)
-            free((genericptr_t) x->epri);
+            free((genericptr_t) x->epri), x->epri = 0;
         if (x->eshk)
-            free((genericptr_t) x->eshk);
+            free((genericptr_t) x->eshk), x->eshk = 0;
         if (x->emin)
-            free((genericptr_t) x->emin);
+            free((genericptr_t) x->emin), x->emin = 0;
         if (x->edog)
-            free((genericptr_t) x->edog);
-        /* [no action needed for x->mcorpsenm] */
+            free((genericptr_t) x->edog), x->edog = 0;
+        x->mcorpsenm = NON_PM; /* no allocation to release */
 
         free((genericptr_t) x);
         m->mextra = (struct mextra *) 0;
@@ -2358,6 +2394,9 @@ dealloc_monst(struct monst *mon)
     }
     if (mon->mextra)
         dealloc_mextra(mon);
+    /* clear out of date information contained in the about-to-become
+       stale memory; see dealloc_obj() */
+    *mon = cg.zeromonst;
     free((genericptr_t) mon);
 }
 
@@ -2367,14 +2406,14 @@ static void
 mon_leaving_level(struct monst *mon)
 {
     coordxy mx = mon->mx, my = mon->my;
-    boolean onmap = (isok(mx, my) && g.level.monsters[mx][my] == mon);
+    boolean onmap = (isok(mx, my) && gl.level.monsters[mx][my] == mon);
 
     /* to prevent an infinite relobj-flooreffects-hmon-killed loop */
     mon->mtrapped = 0;
     unstuck(mon); /* mon is not swallowing or holding you nor held by you */
 
     /* vault guard might be at <0,0> */
-    if (onmap || mon == g.level.monsters[0][0]) {
+    if (onmap || mon == gl.level.monsters[0][0]) {
         if (mon->wormno)
             remove_worm(mon);
         else
@@ -2396,8 +2435,8 @@ mon_leaving_level(struct monst *mon)
         newsym(mx, my);
     }
     /* if mon is a remembered target, forget it since it isn't here anymore */
-    if (mon == g.context.polearm.hitmon)
-        g.context.polearm.hitmon = (struct monst *) 0;
+    if (mon == gc.context.polearm.hitmon)
+        gc.context.polearm.hitmon = (struct monst *) 0;
 }
 
 /* 'mtmp' is going away; remove effects of mtmp from other data structures */
@@ -2437,7 +2476,7 @@ m_detach(
     }
     if (mtmp->data->msound == MS_LEADER)
         leaddead();
-    if (mtmp->m_id == g.stealmid)
+    if (mtmp->m_id == gs.stealmid)
         thiefdead();
     /* release (drop onto map) all objects carried by mtmp; assumes that
        mtmp->mx,my contains the appropriate location */
@@ -2457,6 +2496,11 @@ m_detach(
         mtmp->mstate |= MON_DETACH;
         iflags.purge_monsters++;
     }
+
+    /* hero is thrown from his steed when it dies or gets genocided */
+    if (mtmp == u.usteed)
+        dismount_steed(DISMOUNT_GENERIC);
+    return;
 }
 
 /* give a life-saved monster a reasonable mhpmax value in case it has
@@ -2519,9 +2563,9 @@ lifesaved_monster(struct monst* mtmp)
         }
         m_useup(mtmp, lifesave);
         /* equip replacement amulet, if any, on next move */
-        mtmp->misc_worn_check |= I_SPECIAL;
+        check_gear_next_turn(mtmp);
 
-        surviver = !(g.mvitals[monsndx(mtmp->data)].mvflags & G_GENOD);
+        surviver = !(gm.mvitals[monsndx(mtmp->data)].mvflags & G_GENOD);
         mtmp->mcanmove = 1;
         mtmp->mfrozen = 0;
         if (mtmp->mtame && !mtmp->isminion) {
@@ -2562,14 +2606,14 @@ mondead(struct monst *mtmp)
         /* this only happens if shapeshifted */
         mndx = mtmp->cham;
         if (mndx >= LOW_PM && mndx != monsndx(mtmp->data)
-            && !(g.mvitals[mndx].mvflags & G_GENOD)) {
+            && !(gm.mvitals[mndx].mvflags & G_GENOD)) {
             coord new_xy;
             char buf[BUFSZ];
             /* alternate message phrasing for some monster types */
             boolean spec_mon = (nonliving(mtmp->data)
                                 || noncorporeal(mtmp->data)
                                 || amorphous(mtmp->data)),
-                    spec_death = (g.disintegested /* disintegrated/digested */
+                    spec_death = (gd.disintegested /* disintegrated/digested */
                                   || noncorporeal(mtmp->data)
                                   || amorphous(mtmp->data));
             coordxy x = mtmp->mx, y = mtmp->my;
@@ -2612,7 +2656,7 @@ mondead(struct monst *mtmp)
                       x_monnam(mtmp, ARTICLE_A, (char *) 0,
                                (SUPPRESS_NAME | SUPPRESS_IT
                                 | SUPPRESS_INVISIBLE), FALSE));
-                g.vamp_rise_msg = TRUE;
+                gv.vamp_rise_msg = TRUE;
             }
             newsym(x, y);
             return;
@@ -2628,10 +2672,6 @@ mondead(struct monst *mtmp)
     if (mtmp->isgd && !grddead(mtmp))
         return;
 
-    /* Player is thrown from his steed when it dies */
-    if (mtmp == u.usteed)
-        dismount_steed(DISMOUNT_GENERIC);
-
     mptr = mtmp->data; /* save this for m_detach() */
     /* restore chameleon, lycanthropes to true form at death */
     if (mtmp->cham >= LOW_PM) {
@@ -2645,7 +2685,7 @@ mondead(struct monst *mtmp)
         set_mon_data(mtmp, &mons[PM_HUMAN_WERERAT]);
 
     /*
-     * g.mvitals[].died does double duty as total number of dead monsters
+     * gm.mvitals[].died does double duty as total number of dead monsters
      * and as experience factor for the player killing more monsters.
      * this means that a dragon dying by other means reduces the
      * experience the player gets for killing a dragon directly; this
@@ -2655,16 +2695,16 @@ mondead(struct monst *mtmp)
      * for rings of conflict and such.
      */
     mndx = monsndx(mtmp->data);
-    if (g.mvitals[mndx].died < 255)
-        g.mvitals[mndx].died++;
+    if (gm.mvitals[mndx].died < 255)
+        gm.mvitals[mndx].died++;
 
     /* if it's a (possibly polymorphed) quest leader, mark him as dead */
-    if (mtmp->m_id == g.quest_status.leader_m_id)
-        g.quest_status.leader_is_dead = TRUE;
+    if (mtmp->m_id == gq.quest_status.leader_m_id)
+        gq.quest_status.leader_is_dead = TRUE;
 #ifdef MAIL_STRUCTURES
     /* if the mail daemon dies, no more mail delivery.  -3. */
     if (mndx == PM_MAIL_DAEMON)
-        g.mvitals[mndx].mvflags |= G_GENOD;
+        gm.mvitals[mndx].mvflags |= G_GENOD;
 #endif
 
     if (mtmp->data->mlet == S_KOP) {
@@ -2692,7 +2732,7 @@ mondead(struct monst *mtmp)
         nemdead();
 #endif
 
-    if (mndx == PM_MEDUSA && g.mvitals[mndx].died == 1) {
+    if (mndx == PM_MEDUSA && gm.mvitals[mndx].died == 1) {
         record_achievement(ACH_MEDU); /* also generates a livelog event */
     } else if (unique_corpstat(mtmp->data)) {
         /*
@@ -2703,7 +2743,7 @@ mondead(struct monst *mtmp)
          * unique within each game but unfortunately for this potential
          * usage their kill count is lumped together in a group total.
          */
-        int howmany = g.mvitals[mndx].died;
+        int howmany = gm.mvitals[mndx].died;
 
         /* killing a unique more than once doesn't get logged every time;
            the Wizard and the Riders can be killed more than once
@@ -2732,6 +2772,7 @@ mondead(struct monst *mtmp)
 
     if (glyph_is_invisible(levl[mtmp->mx][mtmp->my].glyph))
         unmap_object(mtmp->mx, mtmp->my);
+
     m_detach(mtmp, mptr);
     return;
 }
@@ -2764,11 +2805,11 @@ corpse_chance(
             else
                 tmp = 0;
             if (was_swallowed && magr) {
-                if (magr == &g.youmonst) {
+                if (magr == &gy.youmonst) {
                     There("is an explosion in your %s!", body_part(STOMACH));
-                    Sprintf(g.killer.name, "%s explosion",
+                    Sprintf(gk.killer.name, "%s explosion",
                             s_suffix(pmname(mdat, Mgender(mon))));
-                    losehp(Maybe_Half_Phys(tmp), g.killer.name, KILLED_BY_AN);
+                    losehp(Maybe_Half_Phys(tmp), gk.killer.name, KILLED_BY_AN);
                 } else {
                     You_hear("an explosion.");
                     magr->mhp -= tmp;
@@ -2826,9 +2867,6 @@ mongone(struct monst* mdef)
        his temporary corridor to/from the vault has been removed */
     if (mdef->isgd && !grddead(mdef))
         return;
-    /* hero is thrown from his steed when it disappears */
-    if (mdef == u.usteed)
-        dismount_steed(DISMOUNT_GENERIC);
     /* stuck to you? release */
     unstuck(mdef);
     /* drop special items like the Amulet so that a dismissed Kop or nurse
@@ -2952,9 +2990,9 @@ monkilled(
        rot completely are described as "falling to pieces" so they do
        leave a corpse (which means staves for wood golem, leather armor for
        leather golem, iron chains for iron golem, not a regular corpse) */
-    g.disintegested = (how == AD_DGST || how == -AD_RBRE
+    gd.disintegested = (how == AD_DGST || how == -AD_RBRE
                        || (how == AD_FIRE && completelyburns(mptr)));
-    if (g.disintegested)
+    if (gd.disintegested)
         mondead(mdef); /* never leaves a corpse */
     else
         mondied(mdef); /* calls mondead() and maybe leaves a corpse */
@@ -2980,10 +3018,10 @@ set_ustuck(struct monst *mtmp)
     if (iflags.sanity_check || iflags.debug_fuzzer) {
         if (mtmp && !next2u(mtmp->mx, mtmp->my))
             impossible("Sticking to %s at distu %d?",
-                       mon_nam(mtmp), distu(mtmp->mx, mtmp->my));
+                       mon_nam(mtmp), mdistu(mtmp));
     }
 
-    g.context.botl = 1;
+    gc.context.botl = 1;
     u.ustuck = mtmp;
     if (!u.ustuck) {
         u.uswallow = 0;
@@ -3007,14 +3045,14 @@ unstuck(struct monst *mtmp)
             u.uy = mtmp->my;
             if (Punished && uchain->where != OBJ_FLOOR)
                 placebc();
-            g.vision_full_recalc = 1;
+            gv.vision_full_recalc = 1;
             docrt();
         }
 
         /* prevent holder/engulfer from immediately re-holding/re-engulfing
            [note: this call to unstuck() might be because u.ustuck has just
            changed shape and doesn't have a holding attack any more, hence
-           don't set mspec_used uncondtionally] */
+           don't set mspec_used unconditionally] */
         if (!mtmp->mspec_used && (dmgtype(ptr, AD_STCK)
                                   || attacktype(ptr, AT_ENGL)
                                   || attacktype(ptr, AT_HUGS)))
@@ -3036,6 +3074,7 @@ xkilled(
 {
     int tmp, mndx;
     coordxy x = mtmp->mx, y = mtmp->my;
+    struct monst museum = cg.zeromonst;
     struct permonst *mdat;
     struct obj *otmp;
     struct trap *t;
@@ -3080,37 +3119,37 @@ xkilled(
     if (mtmp->mtame && !mtmp->isminion)
         EDOG(mtmp)->killed_by_u = 1;
 
-    if (wasinside && g.thrownobj && g.thrownobj != uball
+    if (wasinside && gt.thrownobj && gt.thrownobj != uball
         /* don't give to mon if missile is going to be destroyed */
-        && g.thrownobj->oclass != POTION_CLASS
+        && gt.thrownobj->oclass != POTION_CLASS
         /* don't give to mon if missile is going to return to hero */
-        && g.thrownobj != (struct obj *) iflags.returning_missile) {
+        && gt.thrownobj != (struct obj *) iflags.returning_missile) {
         /* thrown object has killed hero's engulfer; add it to mon's
            inventory now so that it will be placed with mon's other
            stuff prior to lookhere/autopickup when hero is expelled
            below (as a side-effect, this missile has immunity from
            being consumed [for this shot/throw only]) */
-        mpickobj(mtmp, g.thrownobj);
+        mpickobj(mtmp, gt.thrownobj);
         /* let throwing code know that missile has been disposed of */
-        g.thrownobj = 0;
+        gt.thrownobj = 0;
     }
 
-    g.vamp_rise_msg = FALSE; /* might get set in mondead(); checked below */
-    g.disintegested = nocorpse; /* alternate vamp_rise mesg needed if true */
+    gv.vamp_rise_msg = FALSE; /* might get set in mondead(); checked below */
+    gd.disintegested = nocorpse; /* alternate vamp_rise mesg needed if true */
     /* dispose of monster and make cadaver */
-    if (g.stoned)
+    if (gs.stoned)
         monstone(mtmp);
     else
         mondead(mtmp);
-    g.disintegested = FALSE; /* reset */
+    gd.disintegested = FALSE; /* reset */
 
     if (!DEADMONSTER(mtmp)) { /* monster lifesaved */
         /* Cannot put the non-visible lifesaving message in
          * lifesaved_monster() since the message appears only when _you_
          * kill it (as opposed to visible lifesaving which always appears).
          */
-        g.stoned = FALSE;
-        if (!cansee(x, y) && !g.vamp_rise_msg)
+        gs.stoned = FALSE;
+        if (!cansee(x, y) && !gv.vamp_rise_msg)
             pline("Maybe not...");
         return;
     }
@@ -3121,8 +3160,8 @@ xkilled(
     mdat = mtmp->data; /* note: mondead can change mtmp->data */
     mndx = monsndx(mdat);
 
-    if (g.stoned) {
-        g.stoned = FALSE;
+    if (gs.stoned) {
+        gs.stoned = FALSE;
         goto cleanup;
     }
 
@@ -3139,7 +3178,7 @@ xkilled(
         int otyp;
 
         /* illogical but traditional "treasure drop" */
-        if (!rn2(6) && !(g.mvitals[mndx].mvflags & G_NOCORPSE)
+        if (!rn2(6) && !(gm.mvitals[mndx].mvflags & G_NOCORPSE)
             /* no extra item from swallower or steed */
             && (x != u.ux || y != u.uy)
             /* no extra item from kops--too easy to abuse */
@@ -3163,25 +3202,33 @@ xkilled(
         }
         /* corpse--none if hero was inside the monster */
         if (!wasinside && corpse_chance(mtmp, (struct monst *) 0, FALSE)) {
-            g.zombify = (!g.thrownobj && !g.stoned && !uwep
-                         && zombie_maker(&g.youmonst)
+            gz.zombify = (!gt.thrownobj && !gs.stoned && !uwep
+                         && zombie_maker(&gy.youmonst)
                          && zombie_form(mtmp->data) != NON_PM);
             cadaver = make_corpse(mtmp, burycorpse ? CORPSTAT_BURIED
                                                    : CORPSTAT_NONE);
-            g.zombify = FALSE; /* reset */
+            gz.zombify = FALSE; /* reset */
             if (burycorpse && cadaver && cansee(x, y) && !mtmp->minvis
                 && cadaver->where == OBJ_BURIED && !nomsg) {
                 pline("%s corpse ends up buried.", s_suffix(Monnam(mtmp)));
             }
         }
     }
-    if (wasinside)
+
+    if (wasinside) {
+        /* spoteffects() can end up clearing the level of monsters; grab a copy */
+        museum = *mtmp;
+        museum.nmon = 0;
+        museum.minvent = 0;
+        museum.mextra = 0;
         spoteffects(TRUE); /* poor man's expels() */
+        mtmp = &museum; /* use the reference copy now */
+    }
     /* monster is gone, corpse or other object might now be visible */
     newsym(x, y);
 
  cleanup:
-    /* punish bad behaviour */
+    /* punish bad behavior */
     if (is_human(mdat)
         && (!always_hostile(mdat) && mtmp->malign <= 0)
         && (mndx < PM_ARCHEOLOGIST || mndx > PM_WIZARD)
@@ -3200,19 +3247,19 @@ xkilled(
     }
 
     /* give experience points */
-    tmp = experience(mtmp, (int) g.mvitals[mndx].died);
+    tmp = experience(mtmp, (int) gm.mvitals[mndx].died);
     more_experienced(tmp, 0);
     newexplevel(); /* will decide if you go up */
 
     /* adjust alignment points */
-    if (mtmp->m_id == g.quest_status.leader_m_id) { /* REAL BAD! */
+    if (mtmp->m_id == gq.quest_status.leader_m_id) { /* REAL BAD! */
         adjalign(-(u.ualign.record + (int) ALIGNLIM / 2));
         u.ugangr += 7; /* instantly become "extremely" angry */
         change_luck(-20);
         pline("That was %sa bad idea...",
               u.uevent.qcompleted ? "probably " : "");
     } else if (mdat->msound == MS_NEMESIS) { /* Real good! */
-        if (!g.quest_status.killed_leader)
+        if (!gq.quest_status.killed_leader)
             adjalign((int) (ALIGNLIM / 4));
     } else if (mdat->msound == MS_GUARDIAN) { /* Bad */
         adjalign(-(int) (ALIGNLIM / 8));
@@ -3232,10 +3279,13 @@ xkilled(
     } else if (mtmp->mtame) {
         adjalign(-15); /* bad!! */
         /* your god is mighty displeased... */
-        if (!Hallucination)
+        if (!Hallucination) {
+            Soundeffect(se_distant_thunder, 40);
             You_hear("the rumble of distant thunder...");
-        else
+        } else {
+            Soundeffect(se_applause, 40);
             You_hear("the studio audience applaud!");
+        }
         if (!unique_corpstat(mdat)) {
             boolean mname = has_mgivenname(mtmp);
 
@@ -3281,7 +3331,7 @@ vamp_stone(struct monst *mtmp)
 
         /* this only happens if shapeshifted */
         if (mndx >= LOW_PM && mndx != monsndx(mtmp->data)
-            && !(g.mvitals[mndx].mvflags & G_GENOD)) {
+            && !(gm.mvitals[mndx].mvflags & G_GENOD)) {
             char buf[BUFSZ];
 
             /* construct a format string before transformation */
@@ -3392,10 +3442,10 @@ elemental_clog(struct monst *mon)
 
     if (In_endgame(&u.uz)) {
         m1 = m2 = m3 = m4 = m5 = zm = (struct monst *) 0;
-        if (!msgmv || (g.moves - msgmv) > 200L) {
+        if (!msgmv || (gm.moves - msgmv) > 200L) {
             if (!msgmv || rn2(2))
                 You_feel("besieged.");
-            msgmv = g.moves;
+            msgmv = gm.moves;
         }
         /*
          * m1 an elemental from another plane.
@@ -3591,15 +3641,14 @@ m_respond(struct monst* mtmp)
             pline("%s shrieks.", Monnam(mtmp));
             stop_occupation();
         }
-        if (!rn2(10)) {
-            if (!rn2(13)) {
-                /* don't generate purple worms if too difficult */
-                int pm = montoostrong(PM_PURPLE_WORM, monmax_difficulty_lev())
-                         ? PM_BABY_PURPLE_WORM : PM_PURPLE_WORM;
-
-                (void) makemon(&mons[pm], 0, 0, NO_MM_FLAGS);
-            } else
-                (void) makemon((struct permonst *) 0, 0, 0, NO_MM_FLAGS);
+        if (!rn2(10)) { /* 1/10 chance per shriek to create a monster */
+            /* new monster has a 1/13 chance to be a purple worm, random
+               otherwise; baby purple worm if adult is too difficult */
+            (void) makemon(rn2(13) ? (struct permonst *) 0
+                           : &mons[montoostrong(PM_PURPLE_WORM,
+                                                monmax_difficulty_lev())
+                                   ? PM_BABY_PURPLE_WORM : PM_PURPLE_WORM],
+                           0, 0, NO_MM_FLAGS);
         }
         aggravate();
     }
@@ -3611,6 +3660,125 @@ m_respond(struct monst* mtmp)
                 (void) gazemu(mtmp, &mtmp->data->mattk[i]);
                 break;
             }
+    }
+}
+
+/* how quest guardians respond when you attack the quest leader */
+static void
+qst_guardians_respond(void)
+{
+    struct monst *mon;
+    struct permonst *q_guardian = &mons[quest_info(MS_GUARDIAN)];
+    int got_mad = 0;
+
+    /* guardians will sense this attack even if they can't see it */
+    for (mon = fmon; mon; mon = mon->nmon) {
+        if (DEADMONSTER(mon))
+            continue;
+        if (mon->data == q_guardian && mon->mpeaceful) {
+            mon->mpeaceful = 0;
+            if (canseemon(mon))
+                ++got_mad;
+        }
+    }
+    if (got_mad && !Hallucination) {
+        const char *who = q_guardian->pmnames[NEUTRAL];
+
+        if (got_mad > 1)
+            who = makeplural(who);
+        pline_The("%s %s to be angry too...",
+                  who, vtense(who, "appear"));
+    }
+}
+
+/* how other peacefuls react when you attack monster */
+static void
+peacefuls_respond(struct monst *mtmp)
+{
+    struct monst *mon;
+    int mndx = monsndx(mtmp->data);
+
+    for (mon = fmon; mon; mon = mon->nmon) {
+        if (DEADMONSTER(mon))
+            continue;
+        if (mon == mtmp) /* the mpeaceful test catches this since mtmp */
+            continue;    /* is no longer peaceful, but be explicit...  */
+
+        if (!mindless(mon->data) && mon->mpeaceful
+            && couldsee(mon->mx, mon->my) && !mon->msleeping
+            && mon->mcansee && m_canseeu(mon)) {
+            char buf[BUFSZ];
+            boolean exclaimed = FALSE, needpunct = FALSE, alreadyfleeing;
+
+            buf[0] = '\0';
+            if (humanoid(mon->data) || mon->isshk || mon->ispriest) {
+                if (is_watch(mon->data)) {
+                    SetVoice(mon, 0, 80, 0);
+                    verbalize("Halt!  You're under arrest!");
+                    (void) angry_guards(!!Deaf);
+                } else {
+                    if (!Deaf && !rn2(5)) {
+                        const char *gasp = maybe_gasp(mon);
+
+                        if (gasp) {
+                            if (!strncmpi(gasp, "gasp", 4)) {
+                                Sprintf(buf, "%s gasps", Monnam(mon));
+                                needpunct = TRUE;
+                            } else {
+                                Sprintf(buf, "%s exclaims \"%s\"",
+                                        Monnam(mon), gasp);
+                            }
+                            exclaimed = TRUE;
+                        }
+                    }
+                    /* shopkeepers and temple priests might gasp in
+                       surprise, but they won't become angry here */
+                    if (mon->isshk || mon->ispriest) {
+                        if (exclaimed)
+                            pline("%s%s", buf, " then shrugs.");
+                        continue;
+                    }
+
+                    if (mon->data->mlevel < rn2(10)) {
+                        alreadyfleeing = (mon->mflee || mon->mfleetim);
+                        monflee(mon, rn2(50) + 25, TRUE, !exclaimed);
+                        if (exclaimed) {
+                            if (Verbose(2, setmangry) && !alreadyfleeing) {
+                                Strcat(buf, " and then turns to flee.");
+                                needpunct = FALSE;
+                            }
+                        } else
+                            exclaimed = TRUE; /* got msg from monflee() */
+                    }
+                    if (*buf)
+                        pline("%s%s", buf, needpunct ? "." : "");
+                    if (mon->mtame) {
+                        ; /* mustn't set mpeaceful to 0 as below;
+                           * perhaps reduce tameness? */
+                    } else {
+                        mon->mpeaceful = 0;
+                        adjalign(-1);
+                        if (!exclaimed)
+                            pline("%s gets angry!", Monnam(mon));
+                    }
+                }
+            } else if (mon->data->mlet == mtmp->data->mlet
+                       && big_little_match(mndx, monsndx(mon->data))
+                       && !rn2(3)) {
+                if (!rn2(4)) {
+                    growl(mon);
+                    exclaimed = (iflags.last_msg == PLNMSG_GROWL);
+                }
+                if (rn2(6)) {
+                    alreadyfleeing = (mon->mflee || mon->mfleetim);
+                    monflee(mon, rn2(25) + 15, TRUE, !exclaimed);
+                    if (exclaimed && !alreadyfleeing)
+                        /* word like a separate sentence so that we
+                           don't have to poke around inside growl() */
+                        pline("And then starts to flee.");
+                }
+            }
+        }
     }
 }
 
@@ -3667,118 +3835,12 @@ setmangry(struct monst* mtmp, boolean via_attack)
     }
 
     /* attacking your own quest leader will anger his or her guardians */
-    if (mtmp->data == &mons[quest_info(MS_LEADER)]) {
-        struct monst *mon;
-        struct permonst *q_guardian = &mons[quest_info(MS_GUARDIAN)];
-        int got_mad = 0;
-
-        /* guardians will sense this attack even if they can't see it */
-        for (mon = fmon; mon; mon = mon->nmon) {
-            if (DEADMONSTER(mon))
-                continue;
-            if (mon->data == q_guardian && mon->mpeaceful) {
-                mon->mpeaceful = 0;
-                if (canseemon(mon))
-                    ++got_mad;
-            }
-        }
-        if (got_mad && !Hallucination) {
-            const char *who = q_guardian->pmnames[NEUTRAL];
-
-            if (got_mad > 1)
-                who = makeplural(who);
-            pline_The("%s %s to be angry too...",
-                      who, vtense(who, "appear"));
-        }
-    }
+    if (mtmp->data == &mons[quest_info(MS_LEADER)])
+        qst_guardians_respond();
 
     /* make other peaceful monsters react */
-    if (!g.context.mon_moving) {
-        struct monst *mon;
-        int mndx = monsndx(mtmp->data);
-
-        for (mon = fmon; mon; mon = mon->nmon) {
-            if (DEADMONSTER(mon))
-                continue;
-            if (mon == mtmp) /* the mpeaceful test catches this since mtmp */
-                continue;    /* is no longer peaceful, but be explicit...  */
-
-            if (!mindless(mon->data) && mon->mpeaceful
-                && couldsee(mon->mx, mon->my) && !mon->msleeping
-                && mon->mcansee && m_canseeu(mon)) {
-                char buf[BUFSZ];
-                boolean exclaimed = FALSE, needpunct = FALSE, alreadyfleeing;
-
-                buf[0] = '\0';
-                if (humanoid(mon->data) || mon->isshk || mon->ispriest) {
-                    if (is_watch(mon->data)) {
-                        verbalize("Halt!  You're under arrest!");
-                        (void) angry_guards(!!Deaf);
-                    } else {
-                        if (!Deaf && !rn2(5)) {
-                            const char *gasp = maybe_gasp(mon);
-
-                            if (gasp) {
-                                if (!strncmpi(gasp, "gasp", 4)) {
-                                    Sprintf(buf, "%s gasps", Monnam(mon));
-                                    needpunct = TRUE;
-                                } else {
-                                    Sprintf(buf, "%s exclaims \"%s\"",
-                                            Monnam(mon), gasp);
-                                }
-                                exclaimed = TRUE;
-                            }
-                        }
-                        /* shopkeepers and temple priests might gasp in
-                           surprise, but they won't become angry here */
-                        if (mon->isshk || mon->ispriest) {
-                            if (exclaimed)
-                                pline("%s%s", buf, " then shrugs.");
-                            continue;
-                        }
-
-                        if (mon->data->mlevel < rn2(10)) {
-                            alreadyfleeing = (mon->mflee || mon->mfleetim);
-                            monflee(mon, rn2(50) + 25, TRUE, !exclaimed);
-                            if (exclaimed) {
-                                if (Verbose(2, setmangry) && !alreadyfleeing) {
-                                    Strcat(buf, " and then turns to flee.");
-                                    needpunct = FALSE;
-                                }
-                            } else
-                                exclaimed = TRUE; /* got msg from monflee() */
-                        }
-                        if (*buf)
-                            pline("%s%s", buf, needpunct ? "." : "");
-                        if (mon->mtame) {
-                            ; /* mustn't set mpeaceful to 0 as below;
-                               * perhaps reduce tameness? */
-                        } else {
-                            mon->mpeaceful = 0;
-                            adjalign(-1);
-                            if (!exclaimed)
-                                pline("%s gets angry!", Monnam(mon));
-                        }
-                    }
-                } else if (mon->data->mlet == mtmp->data->mlet
-                           && big_little_match(mndx, monsndx(mon->data))
-                           && !rn2(3)) {
-                    if (!rn2(4)) {
-                        growl(mon);
-                        exclaimed = (iflags.last_msg == PLNMSG_GROWL);
-                    }
-                    if (rn2(6)) {
-                        alreadyfleeing = (mon->mflee || mon->mfleetim);
-                        monflee(mon, rn2(25) + 15, TRUE, !exclaimed);
-                        if (exclaimed && !alreadyfleeing)
-                            /* word like a separate sentence so that we
-                               don't have to poke around inside growl() */
-                            pline("And then starts to flee.");
-                    }
-                }
-            }
-        }
-    }
+    if (!gc.context.mon_moving)
+        peacefuls_respond(mtmp);
 }
 
 /* Indicate via message that a monster has awoken. */
@@ -3795,6 +3857,8 @@ wake_msg(struct monst *mtmp, boolean interesting)
 void
 wakeup(struct monst* mtmp, boolean via_attack)
 {
+    boolean was_sleeping = mtmp->msleeping;
+
     wake_msg(mtmp, via_attack);
     mtmp->msleeping = 0;
     if (M_AP_TYPE(mtmp) != M_AP_NOTHING) {
@@ -3802,14 +3866,25 @@ wakeup(struct monst* mtmp, boolean via_attack)
            have to lose his disguise */
         if (M_AP_TYPE(mtmp) != M_AP_MONSTER)
             seemimic(mtmp);
-    } else if (g.context.forcefight && !g.context.mon_moving
+    } else if (gc.context.forcefight && !gc.context.mon_moving
                && mtmp->mundetected) {
         mtmp->mundetected = 0;
         newsym(mtmp->mx, mtmp->my);
     }
     finish_meating(mtmp);
-    if (via_attack)
+    if (via_attack) {
+        boolean was_peaceful = mtmp->mpeaceful;
+
+        if (was_sleeping)
+            growl(mtmp);
         setmangry(mtmp, TRUE);
+        if (was_peaceful) {
+            if (mtmp->ispriest && *in_rooms(mtmp->mx, mtmp->my, TEMPLE))
+                ghod_hitsu(mtmp);
+            if (mtmp->isshk && !*u.ushops)
+                hot_pursuit(mtmp);
+        }
+    }
 }
 
 /* Wake up nearby monsters without angering them. */
@@ -3835,11 +3910,11 @@ wake_nearto(coordxy x, coordxy y, int distance)
             mtmp->msleeping = 0; /* wake indeterminate sleep */
             if (!(mtmp->data->geno & G_UNIQ))
                 mtmp->mstrategy &= ~STRAT_WAITMASK; /* wake 'meditation' */
-            if (g.context.mon_moving)
+            if (gc.context.mon_moving)
                 continue;
             if (mtmp->mtame) {
                 if (!mtmp->isminion)
-                    EDOG(mtmp)->whistletime = g.moves;
+                    EDOG(mtmp)->whistletime = gm.moves;
                 /* Fix up a pet who is stuck "fleeing" its master */
                 mon_track_clear(mtmp);
             }
@@ -3984,7 +4059,7 @@ get_iter_mons_xy(boolean (*func)(struct monst *, coordxy, coordxy),
 
 /* force all chameleons and mimics to become themselves and werecreatures
    to revert to human form; called when Protection_from_shape_changers gets
-   activated via wearing or eating ring */
+   activated via wearing or eating ring or wizintrinsics */
 void
 rescham(void)
 {
@@ -4050,18 +4125,28 @@ restrap(struct monst *mtmp)
     return FALSE;
 }
 
-/* reveal a monster at x,y hiding under an object,
-   if there are no objects there */
+/* reveal a hiding monster at x,y, either under nonexistent object,
+   or an eel out of water. */
 void
 maybe_unhide_at(coordxy x, coordxy y)
 {
     struct monst *mtmp;
+    boolean undetected = FALSE, trapped = FALSE;
 
-    if (OBJ_AT(x, y))
+    if ((mtmp = m_at(x, y)) != (struct monst *) 0) {
+        undetected = mtmp->mundetected;
+        trapped = mtmp->mtrapped;
+    } else if (u_at(x, y)) {
+        mtmp = &gy.youmonst;
+        undetected = u.uundetected;
+        trapped = u.utrap;
+    } else {
         return;
-    if ((mtmp = m_at(x, y)) == 0 && u_at(x, y))
-        mtmp = &g.youmonst;
-    if (mtmp && mtmp->mundetected && hides_under(mtmp->data))
+    }
+
+    if (undetected
+        && ((hides_under(mtmp->data) && (!OBJ_AT(x, y) || trapped))
+            || (mtmp->data->mlet == S_EEL && !is_pool(x, y))))
         (void) hideunder(mtmp);
 }
 
@@ -4070,26 +4155,26 @@ boolean
 hideunder(struct monst *mtmp)
 {
     struct trap *t;
-    boolean oldundetctd, undetected = FALSE, is_u = (mtmp == &g.youmonst);
+    boolean oldundetctd, undetected = FALSE, is_u = (mtmp == &gy.youmonst);
     coordxy x = is_u ? u.ux : mtmp->mx, y = is_u ? u.uy : mtmp->my;
 
     if (mtmp == u.ustuck) {
-        ; /* can't hide if holding you or held by you */
+        ; /* undetected==FALSE; can't hide if holding you or held by you */
     } else if (is_u ? (u.utrap && u.utraptype != TT_PIT)
-                    : (mtmp->mtrapped && (t = t_at(x, y)) != 0
-                       && !is_pit(t->ttyp))) {
-        ; /* can't hide while stuck in a non-pit trap */
+                    : (mtmp->mtrapped
+                       && (t = t_at(x, y)) != 0 && !is_pit(t->ttyp))) {
+        ; /* undetected==FALSE; can't hide while stuck in a non-pit trap */
     } else if (mtmp->data->mlet == S_EEL) {
         undetected = (is_pool(x, y) && !Is_waterlevel(&u.uz));
     } else if (hides_under(mtmp->data) && OBJ_AT(x, y)) {
-        struct obj *otmp = g.level.objects[x][y];
+        struct obj *otmp = gl.level.objects[x][y];
 
         /* most monsters won't hide under cockatrice corpse but they
            can hide under a pile containing more than just such corpses */
         while (otmp && otmp->otyp == CORPSE
                && touch_petrifies(&mons[otmp->corpsenm]))
             otmp = otmp->nexthere;
-        if (otmp != 0 || ((mtmp == &g.youmonst) ? Stone_resistance
+        if (otmp != 0 || ((mtmp == &gy.youmonst) ? Stone_resistance
                                                 : resists_ston(mtmp)))
             undetected = TRUE;
     }
@@ -4115,16 +4200,16 @@ hide_monst(struct monst* mon)
     if ((is_hider(mon->data) || hider_under)
         && !(mon->mundetected || M_AP_TYPE(mon))) {
         coordxy x = mon->mx, y = mon->my;
-        char save_viz = g.viz_array[y][x];
+        char save_viz = gv.viz_array[y][x];
 
         /* override vision, forcing hero to be unable to see monster's spot */
-        g.viz_array[y][x] &= ~(IN_SIGHT | COULD_SEE);
+        gv.viz_array[y][x] &= ~(IN_SIGHT | COULD_SEE);
         if (is_hider(mon->data))
             (void) restrap(mon);
         /* try again if mimic missed its 1/3 chance to hide */
         if (mon->data->mlet == S_MIMIC && !M_AP_TYPE(mon))
             (void) restrap(mon);
-        g.viz_array[y][x] = save_viz;
+        gv.viz_array[y][x] = save_viz;
         if (hider_under)
             (void) hideunder(mon);
     }
@@ -4144,14 +4229,15 @@ mon_animal_list(boolean construct)
                 animal_temp[n++] = i;
         /* if (n == 0) animal_temp[n++] = NON_PM; */
 
-        g.animal_list = (short *) alloc(n * sizeof *g.animal_list);
-        (void) memcpy((genericptr_t) g.animal_list, (genericptr_t) animal_temp,
-                      n * sizeof *g.animal_list);
-        g.animal_list_count = n;
+        ga.animal_list = (short *) alloc(n * sizeof *ga.animal_list);
+        (void) memcpy((genericptr_t) ga.animal_list,
+                      (genericptr_t) animal_temp,
+                      n * sizeof *ga.animal_list);
+        ga.animal_list_count = n;
     } else { /* release */
-        if (g.animal_list)
-            free((genericptr_t) g.animal_list), g.animal_list = 0;
-        g.animal_list_count = 0;
+        if (ga.animal_list)
+            free((genericptr_t) ga.animal_list), ga.animal_list = 0;
+        ga.animal_list_count = 0;
     }
 }
 
@@ -4160,15 +4246,15 @@ pick_animal(void)
 {
     int res;
 
-    if (!g.animal_list)
+    if (!ga.animal_list)
         mon_animal_list(TRUE);
 
-    res = g.animal_list[rn2(g.animal_list_count)];
+    res = ga.animal_list[rn2(ga.animal_list_count)];
     /* rogue level should use monsters represented by uppercase letters
        only, but since chameleons aren't generated there (not uppercase!)
        we don't perform a lot of retries */
     if (Is_rogue_level(&u.uz) && !isupper((uchar) mons[res].mlet))
-        res = g.animal_list[rn2(g.animal_list_count)];
+        res = ga.animal_list[rn2(ga.animal_list_count)];
     return res;
 }
 
@@ -4204,7 +4290,7 @@ decide_to_shapeshift(struct monst *mon, int shiftflags)
             } else if (mon->data == &mons[PM_FOG_CLOUD]
                        && mon->mhp == mon->mhpmax && !rn2(4)
                        && (!canseemon(mon)
-                           || distu(mon->mx, mon->my) > BOLT_LIM * BOLT_LIM)) {
+                           || mdistu(mon) > BOLT_LIM * BOLT_LIM)) {
                 /* if a fog cloud, maybe change to wolf or vampire bat;
                    those are more likely to take damage--at least when
                    tame--and then switch back to vampire; they'll also
@@ -4226,7 +4312,7 @@ decide_to_shapeshift(struct monst *mon, int shiftflags)
         } else {
             if (mon->mhp >= 9 * mon->mhpmax / 10 && !rn2(6)
                 && (!canseemon(mon)
-                    || distu(mon->mx, mon->my) > BOLT_LIM * BOLT_LIM))
+                    || mdistu(mon) > BOLT_LIM * BOLT_LIM))
                 dochng = TRUE; /* 'ptr' stays Null */
         }
     }
@@ -4241,7 +4327,7 @@ decide_to_shapeshift(struct monst *mon, int shiftflags)
 }
 
 static int
-pickvampshape(struct monst* mon)
+pickvampshape(struct monst *mon)
 {
     int mndx = mon->cham, wolfchance = 10;
     /* avoid picking monsters with lowercase display symbols ('d' for wolf
@@ -4266,7 +4352,11 @@ pickvampshape(struct monst* mon)
         break;
     }
 
-    if (g.mvitals[mndx].mvflags & G_GENOD)
+    /* return to base form if chosen poly target has been genocided
+       or randomly if already in an alternate form (to prevent always
+       switching back and forth between bat and fog) */
+    if ((gm.mvitals[mndx].mvflags & G_GENOD) != 0
+        || (mon->data != &mons[mon->cham] && !rn2(4)))
         return mon->cham;
 
     return mndx;
@@ -4277,7 +4367,7 @@ static boolean
 isspecmon(struct monst* mon)
 {
     return (mon->isshk || mon->ispriest || mon->isgd
-            || mon->m_id == g.quest_status.leader_m_id);
+            || mon->m_id == gq.quest_status.leader_m_id);
 }
 
 /* restrict certain special monsters (shopkeepers, aligned priests,
@@ -4385,7 +4475,7 @@ select_newcham_form(struct monst* mon)
         } else if (!rn2(3)) { /* quest guardians */
             mndx = rn1(PM_APPRENTICE - PM_STUDENT + 1, PM_STUDENT);
             /* avoid own role's guardian */
-            if (mndx == g.urole.guardnum)
+            if (mndx == gu.urole.guardnum)
                 mndx = NON_PM;
         } else { /* general humanoids */
             tryct = 5;
@@ -4518,7 +4608,7 @@ accept_newcham_form(struct monst *mon, int mndx)
     if (mndx == NON_PM)
         return 0;
     mdat = &mons[mndx];
-    if ((g.mvitals[mndx].mvflags & G_GENOD) != 0)
+    if ((gm.mvitals[mndx].mvflags & G_GENOD) != 0)
         return 0;
     if (is_placeholder(mdat))
         return 0;
@@ -4616,7 +4706,7 @@ newcham(
         } while (--tryct > 0);
         if (!tryct)
             return 0;
-    } else if (g.mvitals[monsndx(mdat)].mvflags & G_GENOD)
+    } else if (gm.mvitals[monsndx(mdat)].mvflags & G_GENOD)
         return 0; /* passed in mdat is genocided */
 
     if (mdat == olddata)
@@ -4652,9 +4742,7 @@ newcham(
     /* set level and hit points */
     newmonhp(mtmp, monsndx(mdat));
     /* new hp: same fraction of max as before */
-#ifndef LINT
     mtmp->mhp = (int) (((long) hpn * (long) mtmp->mhp) / (long) hpd);
-#endif
     /* sanity check (potential overflow) */
     if (mtmp->mhp < 0 || mtmp->mhp > mtmp->mhpmax)
         mtmp->mhp = mtmp->mhpmax;
@@ -4720,7 +4808,7 @@ newcham(
                 /* update swallow glyphs for new monster */
                 swallowed(0);
             }
-        } else if (!sticks(mdat) && !sticks(g.youmonst.data))
+        } else if (!sticks(mdat) && !sticks(gy.youmonst.data))
             unstuck(mtmp);
     }
 
@@ -4756,8 +4844,8 @@ newcham(
     mon_break_armor(mtmp, polyspot);
     if (!(mtmp->misc_worn_check & W_ARMG))
         mselftouch(mtmp, "No longer petrify-resistant, ",
-                   !g.context.mon_moving);
-    m_dowear(mtmp, FALSE);
+                   !gc.context.mon_moving);
+    check_gear_next_turn(mtmp);
 
     /* This ought to re-test can_carry() on each item in the inventory
      * rather than just checking ex-giants & boulders, but that'd be
@@ -4850,8 +4938,8 @@ dead_species(int m_idx, boolean egg)
      * overpopulation does not kill eggs.
      */
     alt_idx = egg ? big_to_little(m_idx) : m_idx;
-    return (boolean) ((g.mvitals[m_idx].mvflags & G_GENOD) != 0
-                      || (g.mvitals[alt_idx].mvflags & G_GENOD) != 0);
+    return (boolean) ((gm.mvitals[m_idx].mvflags & G_GENOD) != 0
+                      || (gm.mvitals[alt_idx].mvflags & G_GENOD) != 0);
 }
 
 /* kill off any eggs of genocided monsters */
@@ -4909,8 +4997,8 @@ kill_genocided_monsters(void)
             continue;
         mndx = monsndx(mtmp->data);
         kill_cham = (mtmp->cham >= LOW_PM
-                     && (g.mvitals[mtmp->cham].mvflags & G_GENOD));
-        if ((g.mvitals[mndx].mvflags & G_GENOD) || kill_cham) {
+                     && (gm.mvitals[mtmp->cham].mvflags & G_GENOD));
+        if ((gm.mvitals[mndx].mvflags & G_GENOD) || kill_cham) {
             if (mtmp->cham >= LOW_PM && !kill_cham)
                 (void) newcham(mtmp, (struct permonst *) 0, NC_SHOW_MSG);
             else
@@ -4920,10 +5008,10 @@ kill_genocided_monsters(void)
             kill_eggs(mtmp->minvent);
     }
 
-    kill_eggs(g.invent);
+    kill_eggs(gi.invent);
     kill_eggs(fobj);
-    kill_eggs(g.migrating_objs);
-    kill_eggs(g.level.buriedobjlist);
+    kill_eggs(gm.migrating_objs);
+    kill_eggs(gl.level.buriedobjlist);
 }
 
 void
@@ -5003,6 +5091,7 @@ angry_guards(boolean silent)
                       buf, vtense(buf, "are"));
             } else {
                 Strcpy(buf, (ct == 1) ? "a guard's" : "guards'");
+                Soundeffect(se_shrill_whistle, 100);
                 You_hear("the shrill sound of %s whistle%s.", buf, plur(ct));
             }
         }
@@ -5052,7 +5141,7 @@ usmellmon(struct permonst* mdat)
     boolean msg_given = FALSE;
 
     if (mdat) {
-        if (!olfaction(g.youmonst.data))
+        if (!olfaction(gy.youmonst.data))
             return FALSE;
         mndx = monsndx(mdat);
         switch (mndx) {
@@ -5147,7 +5236,7 @@ usmellmon(struct permonst* mdat)
                 msg_given = TRUE;
                 break;
             case S_ORC:
-                if (maybe_polyd(is_orc(g.youmonst.data), Race_if(PM_ORC)))
+                if (maybe_polyd(is_orc(gy.youmonst.data), Race_if(PM_ORC)))
                     You("notice an attractive smell.");
                 else
                     pline("A foul stench makes you feel a little nauseated.");
@@ -5160,4 +5249,12 @@ usmellmon(struct permonst* mdat)
     return msg_given ? TRUE : FALSE;
 }
 
+/* setting misc_worn_check's I_SPECIAL bit flags a monster to reassess
+   and potentially re-equip gear at the start of its next move;
+   this hides the details of that */
+void
+check_gear_next_turn(struct monst *mon)
+{
+    mon->misc_worn_check |= I_SPECIAL;
+}
 /*mon.c*/

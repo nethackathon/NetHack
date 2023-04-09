@@ -314,7 +314,7 @@
 #define SHELL /* do not delete the '!' command */
 #endif
 
-#include "system.h"
+/* #include "system.h" */
 
 #if defined(POSIX_TYPES) || defined(__GNUC__)
 #include <stdlib.h>
@@ -335,13 +335,15 @@
 #include <memory.h>
 #endif
 #else         /* therefore SYSV */
+#ifdef NOT_C99
 #ifndef index /* some systems seem to do this for you */
 #define index strchr
 #endif
 #ifndef rindex
 #define rindex strrchr
 #endif
-#endif
+#endif  /* NOT_C99 */
+#endif  /* SYSV */
 
 /* Use the high quality random number routines. */
 /* the high quality random number routines */

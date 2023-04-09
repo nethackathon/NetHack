@@ -19,7 +19,7 @@ typedef struct d_flags {     /* dungeon/level type flags */
     Bitfield(maze_like, 1);  /* is this a maze? */
     Bitfield(rogue_like, 1); /* is this an old-fashioned presentation? */
     Bitfield(align, 3);      /* dungeon alignment. */
-    Bitfield(unused, 1);     /* etc... */
+    Bitfield(unconnected, 1); /* dungeon not connected to any branch */
 } d_flags;
 
 typedef struct s_level { /* special dungeon level element */
@@ -246,7 +246,7 @@ typedef struct mapseen {
     struct mapseen_rooms {
         Bitfield(seen, 1);
         Bitfield(untended, 1);         /* flag for shop without shk */
-    } msrooms[(MAXNROFROOMS + 1) * 2]; /* same size as g.rooms[] */
+    } msrooms[(MAXNROFROOMS + 1) * 2]; /* same size as gr.rooms[] */
     /* dead heroes; might not have graves or ghosts */
     struct cemetery *final_resting_place; /* same as level.bonesinfo */
 } mapseen;

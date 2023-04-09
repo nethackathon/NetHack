@@ -26,6 +26,7 @@
 #define LICENSE "license"       /* file with license information */
 #define OPTIONFILE "opthelp"    /* file explaining runtime options */
 #define OPTMENUHELP "optmenu"   /* file explaining #options command */
+#define USAGEHELP "usagehlp"    /* file explaining command line use */
 #define OPTIONS_USED "options"  /* compile-time options, for #version */
 #define SYMBOLS "symbols"       /* replacement symbol sets */
 #define EPITAPHFILE "epitaph"   /* random epitaphs on graves */
@@ -145,6 +146,21 @@ typedef uchar nhsym;
 
 #include "coord.h"
 
+/* define USING_ADDRESS_SANITIZER if ASAN is in use */
+#if defined(__clang__)
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define USING_ADDRESS_SANITIZER
+#endif  /* __has_feature */
+#endif  /* __has_feature(address_sanitizer) */
+#else   /* ?__clang__ */
+#if defined(__GNUC__) || defined(_MSC_VER)
+#ifdef __SANITIZE_ADDRESS__
+#define USING_ADDRESS_SANITIZER
+#endif  /* __SANITIZE_ADDRESS__ */
+#endif  /* __GNUC__ || _MSC_VER */
+#endif  /* !__clang__ */
+
 /*
  * Automatic inclusions for the subsidiary files.
  * Please don't change the order.  It does matter.
@@ -253,17 +269,17 @@ typedef uchar nhsym;
 #endif
 
 #if defined(X11_GRAPHICS) || defined(QT_GRAPHICS) || defined(GNOME_GRAPHICS) \
-    || defined(WIN32)
+    || defined(MSWIN_GRAPHICS)
 #ifndef NO_TILE_C
-#ifndef USE_TILES
-#define USE_TILES /* glyphmap[] with prefilled tile mappings will be available */
+#ifndef TILES_IN_GLYPHMAP
+#define TILES_IN_GLYPHMAP
 #endif
 #endif
 #endif
 #if defined(AMII_GRAPHICS) || defined(GEM_GRAPHICS)
 #ifndef NO_TILE_C
-#ifndef USE_TILES
-#define USE_TILES
+#ifndef TILES_IN_GLYPHMAP
+#define TILES_IN_GLYPHMAP
 #endif
 #endif
 #endif
@@ -303,9 +319,9 @@ typedef uchar nhsym;
    if nethack is built with MONITOR_HEAP enabled and they aren't; this
    declaration has been moved out of the '#else' below to avoid getting
    a complaint from -Wmissing-prototypes when building with MONITOR_HEAP */
-extern char *dupstr(const char *);
+extern char *dupstr(const char *) NONNULL;
 /* same, but return strlen(string) */
-extern char *dupstr_n(const char *string, unsigned int *lenout);
+extern char *dupstr_n(const char *string, unsigned int *lenout) NONNULL;
 
 /*
  * MONITOR_HEAP is conditionally used for primitive memory leak debugging.
@@ -317,10 +333,10 @@ extern char *dupstr_n(const char *string, unsigned int *lenout);
  */
 #ifdef MONITOR_HEAP
 /* plain alloc() is not declared except in alloc.c */
-extern long *nhalloc(unsigned int, const char *, int);
-extern long *nhrealloc(long *, unsigned int, const char *, int);
+extern long *nhalloc(unsigned int, const char *, int) NONNULL;
+extern long *nhrealloc(long *, unsigned int, const char *, int) NONNULL;
 extern void nhfree(genericptr_t, const char *, int);
-extern char *nhdupstr(const char *, const char *, int);
+extern char *nhdupstr(const char *, const char *, int) NONNULL;
 /* this predates C99's __func__; that is trickier to use conditionally
    because it is not implemented as a preprocessor macro; MONITOR_HEAP
    wouldn't gain much benefit from it anyway so continue to live without it;
@@ -337,8 +353,8 @@ extern char *nhdupstr(const char *, const char *, int);
 #define dupstr(s) nhdupstr(s, __FILE__, (int) __LINE__)
 #else /* !MONITOR_HEAP */
 /* declare alloc.c's alloc(); allocations made with it use ordinary free() */
-extern long *alloc(unsigned int);  /* alloc.c */
-extern long *re_alloc(long *, unsigned int);
+extern long *alloc(unsigned int) NONNULL;  /* alloc.c */
+extern long *re_alloc(long *, unsigned int) NONNULL;
 #endif /* ?MONITOR_HEAP */
 
 /* Used for consistency checks of various data files; declare it here so
@@ -400,11 +416,11 @@ extern struct nomakedefs_s nomakedefs;
 
 #define MAXNROFROOMS 40 /* max number of rooms per level */
 #define MAX_SUBROOMS 24 /* max # of subrooms in a given room */
-#define DOORMAX 120     /* max number of doors per level */
+#define DOORINC 120     /* number of doors per level, increment */
 
 #define BUFSZ 256  /* for getlin buffers */
 #define QBUFSZ 128 /* for building question text */
-#define TBUFSZ 300 /* g.toplines[] buffer max msg: 3 81char names */
+#define TBUFSZ 300 /* gt.toplines[] buffer max msg: 3 81char names */
 /* plus longest prefix plus a few extra words */
 
 /* COLBUFSZ is the larger of BUFSZ and COLNO */

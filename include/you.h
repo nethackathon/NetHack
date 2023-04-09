@@ -23,8 +23,8 @@ struct RoleName {
 struct RoleAdvance {
     /* "fix" is the fixed amount, "rnd" is the random amount */
     xint16 infix, inrnd; /* at character initialization */
-    xint16 lofix, lornd; /* gained per level <  g.urole.xlev */
-    xint16 hifix, hirnd; /* gained per level >= g.urole.xlev */
+    xint16 lofix, lornd; /* gained per level <  gu.urole.xlev */
+    xint16 hifix, hirnd; /* gained per level >= gu.urole.xlev */
 };
 
 struct u_have {
@@ -114,7 +114,7 @@ enum achivements {
      *  defeated nemesis (not same as acquiring Bell or artifact),
      *  completed quest (formally, by bringing artifact to leader),
      *  entered rogue level,
-     *  entered Fort Ludios level/branch (not guaranteed to be achieveable),
+     *  entered Fort Ludios level/branch (not guaranteed to be achievable),
      *  entered Medusa level,
      *  entered castle level,
      *  obtained castle wand (handle similarly to mines and sokoban prizes),
@@ -228,8 +228,8 @@ struct Role {
 };
 
 extern const struct Role roles[]; /* table of available roles */
-#define Role_if(X) (g.urole.mnum == (X))
-#define Role_switch (g.urole.mnum)
+#define Role_if(X) (gu.urole.mnum == (X))
+#define Role_switch (gu.urole.mnum)
 
 /* used during initialization for race, gender, and alignment
    as well as for character class */
@@ -278,8 +278,8 @@ struct Race {
 };
 
 extern const struct Race races[]; /* Table of available races */
-#define Race_if(X) (g.urace.mnum == (X))
-#define Race_switch (g.urace.mnum)
+#define Race_if(X) (gu.urace.mnum == (X))
+#define Race_switch (gu.urace.mnum)
 
 /*** Unified structure specifying gender information ***/
 struct Gender {
@@ -355,6 +355,8 @@ struct you {
     d_level uz, uz0;    /* your level on this and the previous turn */
     d_level utolev;     /* level monster teleported you to, or uz */
     uchar utotype;      /* bitmask of goto_level() flags for utolev */
+    d_level ucamefrom;  /* level where you came from; used for tutorial */
+    boolean nofollowers; /* level change ignores monster followers/pets */
     boolean umoved;     /* changed map location (post-move) */
     int last_str_turn;  /* 0: none, 1: half turn, 2: full turn
                          * +: turn right, -: turn left */
@@ -417,7 +419,7 @@ struct you {
     Bitfield(uinvulnerable, 1); /* you're invulnerable (praying) */
     Bitfield(uburied, 1);       /* you're buried */
     Bitfield(uedibility, 1);    /* blessed food detect; sense unsafe food */
-    /* 1 free bit! */
+    Bitfield(usaving_grace, 1); /* prevents death once */
 
     unsigned udg_cnt;           /* how long you have been demigod */
     struct u_event uevent;      /* certain events have happened */
@@ -480,6 +482,48 @@ struct you {
     short mcham;             /* vampire mndx if shapeshifted to bat/cloud */
     schar uachieved[N_ACH];  /* list of achievements in the order attained */
 }; /* end of `struct you' */
+
+
+/* _hitmon_data: Info for when hero hits a monster */
+/* The basic reason we need all these booleans is that we don't want
+ * a "hit" message when a monster dies, so we have to know how much
+ * damage it did _before_ outputting a hit message, but any messages
+ * associated with the damage don't come out until _after_ outputting
+ * a hit message.
+ *
+ * More complications:  first_weapon_hit() should be called before
+ * xkilled() in order to have the gamelog messages in the right order.
+ * So it can't be deferred until end of known_hitum() as was originally
+ * done.
+ */
+struct _hitmon_data {
+    int dmg;  /* damage */
+    int thrown;
+    int dieroll;
+    struct permonst *mdat;
+    boolean use_weapon_skill;
+    boolean train_weapon_skill;
+    int barehand_silver_rings;
+    boolean silvermsg;
+    boolean silverobj;
+    boolean lightobj;
+    int material;
+    int jousting;
+    boolean hittxt;
+    boolean get_dmg_bonus;
+    boolean unarmed;
+    boolean hand_to_hand;
+    boolean ispoisoned;
+    boolean unpoisonmsg;
+    boolean needpoismsg;
+    boolean poiskilled;
+    boolean already_killed;
+    boolean destroyed;
+    boolean dryit;
+    boolean doreturn;
+    boolean retval;
+    char saved_oname[BUFSZ];
+};
 
 #define Upolyd (u.umonnum != u.umonster)
 #define Ugender ((Upolyd ? u.mfemale : flags.female) ? 1 : 0)

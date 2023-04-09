@@ -1,5 +1,5 @@
 /* NetHack 3.7	wintty.h	$NHDT-Date: 1656014599 2022/06/23 20:03:19 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.55 $ */
-/* Copyright (c) David Cohrs, 1991,1992				  */
+/* Copyright (c) David Cohrs, 1991,1992                           */
 /* NetHack may be freely redistributed.  See license for details. */
 
 #ifndef WINTTY_H
@@ -92,6 +92,7 @@ struct DisplayDesc {
     short curx, cury; /* current cursor position on the screen */
 #ifdef TEXTCOLOR
     int color; /* current color */
+    uint32 framecolor; /* current background color */
 #endif
     int attrs;         /* attributes in effect */
     int toplin;        /* flag for topl stuff */
@@ -153,11 +154,11 @@ E void tty_shutdown(void);
 #endif
 E int xputc(int);
 E void xputs(const char *);
-#if defined(SCREEN_VGA) || defined(SCREEN_8514)
-E void xputg(const glyph_info *);
+#if defined(SCREEN_VGA) || defined(SCREEN_8514) || defined(SCREEN_VESA)
+E void xputg(const glyph_info *, const glyph_info *);
 #endif
 E void cl_end(void);
-E void clear_screen(void);
+E void term_clear_screen(void);
 E void home(void);
 E void standoutbeg(void);
 E void standoutend(void);
@@ -188,6 +189,7 @@ E void term_end_raw_bold(void);
 #ifdef TEXTCOLOR
 E void term_end_color(void);
 E void term_start_color(int color);
+E void term_start_bgcolor(int color);
 #endif /* TEXTCOLOR */
 #ifdef ENHANCED_SYMBOLS
 extern void term_start_24bitcolor(struct unicode_representation *);
@@ -289,7 +291,26 @@ E win_request_info *tty_ctrl_nhwindow(winid, int, win_request_info *);
 E void tty_refresh_inventory(int start, int stop, int y);
 #endif
 
-#ifdef NO_TERMS
+/* termcap is implied if NO_TERMS is not defined */
+#ifndef NO_TERMS
+#ifndef NO_TERMCAP_HEADERS
+#ifdef delay_output /* avoid conflict in curses.h */
+#undef delay_output
+#endif
+#include <curses.h>
+#ifdef clear_screen /* avoid a conflict */
+#undef clear_screen
+#endif
+#include <term.h>
+#else
+extern int tgetent(char *, const char *);
+extern void tputs(const char *, int, int (*)(int));
+extern int tgetnum(const char *);
+extern int tgetflag(const char *);
+extern char *tgetstr(const char *, char **);
+extern char *tgoto(const char *, int, int);
+#endif /* NO_TERMCAP_HEADERS */
+#else  /* ?NO_TERMS */
 #ifdef MAC
 #ifdef putchar
 #undef putchar
@@ -315,7 +336,7 @@ E int term_puts(const char *str);
 E void video_update_positionbar(char *);
 #endif
 #endif /*MSDOS*/
-#endif /*NO_TERMS*/
+#endif /* NO_TERMS */
 
 #undef E
 

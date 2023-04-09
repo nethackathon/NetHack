@@ -130,7 +130,7 @@ msummon(struct monst *mon)
      * If this daemon is unique and being re-summoned (the only way we
      * could get this far with an extinct dtype), try another.
      */
-    if ((g.mvitals[dtype].mvflags & G_GONE) != 0) {
+    if ((gm.mvitals[dtype].mvflags & G_GONE) != 0) {
         dtype = ndemon(atyp);
         if (dtype == NON_PM)
             return 0;
@@ -241,6 +241,7 @@ summon_minion(aligntyp alignment, boolean talk)
             else
                 You_feel("%s booming voice:",
                          s_suffix(align_gname(alignment)));
+            SetVoice(mon, 0, 80, 0);
             verbalize("Thou shalt pay for thine indiscretion!");
             if (canspotmon(mon))
                 pline("%s appears before you.", Amonnam(mon));
@@ -274,7 +275,7 @@ demon_talk(register struct monst *mtmp)
         reset_faint(); /* if fainted - wake up */
     } else {
         stop_occupation();
-        if (g.multi > 0) {
+        if (gm.multi > 0) {
             nomul(0);
             unmul((char *) 0);
         }
@@ -291,7 +292,7 @@ demon_talk(register struct monst *mtmp)
         }
         newsym(mtmp->mx, mtmp->my);
     }
-    if (g.youmonst.data->mlet == S_DEMON) { /* Won't blackmail their own. */
+    if (gy.youmonst.data->mlet == S_DEMON) { /* Won't blackmail their own. */
         if (!Deaf)
             pline("%s says, \"Good hunting, %s.\"", Amonnam(mtmp),
                   flags.female ? "Sister" : "Brother");
@@ -301,11 +302,11 @@ demon_talk(register struct monst *mtmp)
             (void) rloc(mtmp, RLOC_MSG);
         return 1;
     }
-    cash = money_cnt(g.invent);
+    cash = money_cnt(gi.invent);
     demand = (cash * (rnd(80) + 20 * Athome))
            / (100 * (1 + (sgn(u.ualign.type) == sgn(mtmp->data->maligntyp))));
 
-    if (!demand || g.multi < 0) { /* you have no gold or can't move */
+    if (!demand || gm.multi < 0) { /* you have no gold or can't move */
         mtmp->mpeaceful = 0;
         set_malign(mtmp);
         return 0;
@@ -352,7 +353,7 @@ bribe(struct monst *mtmp)
 {
     char buf[BUFSZ] = DUMMY;
     long offer;
-    long umoney = money_cnt(g.invent);
+    long umoney = money_cnt(gi.invent);
 
     getlin("How much will you offer?", buf);
     if (sscanf(buf, "%ld", &offer) != 1)
@@ -373,7 +374,7 @@ bribe(struct monst *mtmp)
         You("give %s %ld %s.", mon_nam(mtmp), offer, currency(offer));
     }
     (void) money2mon(mtmp, offer);
-    g.context.botl = 1;
+    gc.context.botl = 1;
     return offer;
 }
 
@@ -384,7 +385,7 @@ dprince(aligntyp atyp)
 
     for (tryct = !In_endgame(&u.uz) ? 20 : 0; tryct > 0; --tryct) {
         pm = rn1(PM_DEMOGORGON + 1 - PM_ORCUS, PM_ORCUS);
-        if (!(g.mvitals[pm].mvflags & G_GONE)
+        if (!(gm.mvitals[pm].mvflags & G_GONE)
             && (atyp == A_NONE || sgn(mons[pm].maligntyp) == sgn(atyp)))
             return pm;
     }
@@ -398,7 +399,7 @@ dlord(aligntyp atyp)
 
     for (tryct = !In_endgame(&u.uz) ? 20 : 0; tryct > 0; --tryct) {
         pm = rn1(PM_YEENOGHU + 1 - PM_JUIBLEX, PM_JUIBLEX);
-        if (!(g.mvitals[pm].mvflags & G_GONE)
+        if (!(gm.mvitals[pm].mvflags & G_GONE)
             && (atyp == A_NONE || sgn(mons[pm].maligntyp) == sgn(atyp)))
             return pm;
     }
@@ -409,7 +410,7 @@ dlord(aligntyp atyp)
 int
 llord(void)
 {
-    if (!(g.mvitals[PM_ARCHON].mvflags & G_GONE))
+    if (!(gm.mvitals[PM_ARCHON].mvflags & G_GONE))
         return PM_ARCHON;
 
     return lminion(); /* approximate */
@@ -464,6 +465,7 @@ lose_guardian_angel(struct monst *mon) /* if null, angel hasn't been created yet
         if (canspotmon(mon)) {
             if (!Deaf) {
                 pline("%s rebukes you, saying:", Monnam(mon));
+                SetVoice(mon, 0, 80, 0);
                 verbalize("Since you desire conflict, have some more!");
             } else {
                 pline("%s vanishes!", Monnam(mon));
@@ -496,6 +498,7 @@ gain_guardian_angel(void)
             pline("A voice booms:");
         else
             You_feel("a booming voice:");
+        SetVoice((struct monst *) 0, 0, 80, voice_deity);
         verbalize("Thy desire for conflict shall be fulfilled!");
         /* send in some hostile angels instead */
         lose_guardian_angel((struct monst *) 0);
@@ -504,6 +507,7 @@ gain_guardian_angel(void)
             pline("A voice whispers:");
         else
             You_feel("a soft voice:");
+        SetVoice((struct monst *) 0, 0, 80, voice_deity);
         verbalize("Thou hast been worthy of me!");
         mm.x = u.ux;
         mm.y = u.uy;
