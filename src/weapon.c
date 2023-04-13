@@ -1679,7 +1679,8 @@ skill_init(const struct def_skill *class_skill)
     for (skill = 0; skill < P_NUM_SKILLS; skill++) {
         if (!P_RESTRICTED(skill)) {
             if (P_MAX_SKILL(skill) < P_SKILL(skill)) {
-                impossible("skill_init: curr > max: %s", P_NAME(skill));
+                // For NetHackathon, we want to grant random inventory, so it's okay that we get here
+                // impossible("skill_init: curr > max: %s", P_NAME(skill));
                 P_MAX_SKILL(skill) = P_SKILL(skill);
             }
             P_ADVANCE(skill) = practice_needed_to_advance(P_SKILL(skill) - 1);

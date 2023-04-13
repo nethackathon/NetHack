@@ -14,6 +14,7 @@ struct trobj {
 };
 
 static void ini_inv(struct trobj *);
+static void ini_nethackathon(void);
 static void knows_object(int);
 static void knows_class(char);
 static boolean restricted_spell_discipline(int);
@@ -939,6 +940,9 @@ u_init(void)
     if (num_spells() && (u.uenmax < SPELL_LEV_PW(1)))
         u.uen = u.uenmax = u.uenpeak = u.ueninc[u.ulevel] = SPELL_LEV_PW(1);
 
+    // Add random items for NetHackathon
+    ini_nethackathon();
+
     return;
 }
 
@@ -1193,6 +1197,72 @@ ini_inv(struct trobj *trop)
             continue; /* make a similar object */
         trop++;
     }
+}
+
+static void
+ini_nethackathon() {
+    struct obj *obj;
+    int otyp;
+    // Add random items to starting inventory for NetHackathon event only
+    int objindex = rn2(17);
+    static struct trobj NetHackathon[] = {
+      { MAGIC_MARKER, 10, TOOL_CLASS, 1, 0 },
+      { LONG_SWORD, 0, WEAPON_CLASS, 1, 0 },
+      { SACK, 0, TOOL_CLASS, 1, 0 },
+      { KATANA, 0, WEAPON_CLASS, 1, 0 },
+      { WAN_SPEED_MONSTER, 2, WAND_CLASS, 1, 0},
+      { BUGLE, 0, TOOL_CLASS, 1, 0 },
+      { STATUE, 0, ROCK_CLASS, 1, 0 },
+      { STETHOSCOPE, 0, TOOL_CLASS, 1, 0 },
+      { WAN_OPENING, 3, WAND_CLASS, 1, 0 },
+      { ATHAME, -1, WEAPON_CLASS, 1, 0 },
+      { PICK_AXE, 0, TOOL_CLASS, 1, 0 },
+      { SPE_BLANK_PAPER, 0, SPBOOK_CLASS, 1, 0 },
+      { FIGURINE, 0, TOOL_CLASS, 1, 0 },
+      { WOODEN_HARP, 0, TOOL_CLASS, 1, 0 },
+      { LOADSTONE, 0, TOOL_CLASS, 1, 0 },
+      { TIN, 0, FOOD_CLASS, 1, 0 },
+      { BOOMERANG, 0, WEAPON_CLASS, 1, 0 },
+    };
+    const char *const objnames[] = {
+      "hackemslashem's heavily used marker",
+      "finitelycraig's very wet sword",
+      "Cloudmillion's sack of holding",
+      "HakureiDeity's bloody katana",
+      "luxidream's very fast wand",
+      "d_i_s_p_e_r_s_e's tarnished bugle",
+      "Theyflower's newt family member",
+      "Andrio_Celos' jewel-encrusted stethoscope",
+      "LythariDrow's wand of 'nothing'",
+      "JJVanTheMan's dulled athame",
+      "Antigulp's diamond pickaxe",
+      "Priestess_of_Athe's holy scripture",
+      "AmericanElm's animal companion",
+      "PeteGoz's bass harp",
+      "spazm9000's protection from knockback",
+      "lidlraccoon's tasty snack",
+      "Unit327's bent stick",
+    };
+    otyp = (int) NetHackathon[objindex].trotyp;
+    obj = mksobj(otyp, TRUE, FALSE);
+    if (objindex == 1) {
+      obj->oeroded = 2;
+    }
+    if (objindex == 6) {
+        obj->corpsenm = PM_NEWT;
+    }
+    if (objindex == 12) {
+        obj->corpsenm = PM_WOODCHUCK;
+    }
+    if (objindex == 14) {
+        obj->cursed = 0;
+    }
+    if (objindex == 15) {
+        obj->corpsenm = PM_SHRIEKER;
+    }
+    obj = oname(obj, objnames[objindex], ONAME_NO_FLAGS);
+    obj->owt = weight(obj);
+    obj = addinv(obj);
 }
 
 /*u_init.c*/
