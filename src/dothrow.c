@@ -2394,6 +2394,21 @@ release_camera_demon(struct obj *obj, coordxy x, coordxy y)
     }
 }
 
+/* Scatter contents of Faberge egg around.
+   Copied from boh explosion routine.
+ */
+static void
+do_faberge_explosion(struct obj *boh, coordxy x, coordxy y)
+{
+    struct obj *otmp, *nobj;
+
+    for (otmp = boh->cobj; otmp; otmp = nobj) {
+        nobj = otmp->nobj;
+        otmp->ox = x, otmp->oy = y;
+        (void) scatter(x, y, 4, MAY_HIT | MAY_DESTROY, otmp);
+    }
+}
+
 /*
  * Break an object.  Breakable armor goes through erosion steps; other
  * items break unconditionally.  Assumes all resistance checks
@@ -2415,6 +2430,9 @@ breakobj(
                           EF_DESTROY | EF_VERBOSE) == ER_DESTROYED);
 
     switch (obj->oclass == POTION_CLASS ? POT_WATER : obj->otyp) {
+    case FABERGE_EGG:
+        do_faberge_explosion(obj, x, y);
+        break;
     case MIRROR:
         if (hero_caused)
             change_luck(-2);
@@ -2538,12 +2556,13 @@ breakmsg(struct obj *obj, boolean in_view)
     to_pieces = "";
     switch (obj->oclass == POTION_CLASS ? POT_WATER : obj->otyp) {
     default: /* glass or crystal wand */
-        if (obj->oclass != WAND_CLASS)
+        if (obj->oclass != WAND_CLASS && obj->otyp != FABERGE_EGG)
             impossible("breaking odd object (%d)?", obj->otyp);
         /*FALLTHRU*/
     case LENSES:
     case MIRROR:
     case CRYSTAL_BALL:
+    case FABERGE_EGG:
     case EXPENSIVE_CAMERA:
         to_pieces = " into a thousand pieces";
     /*FALLTHRU*/

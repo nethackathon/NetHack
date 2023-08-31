@@ -4058,6 +4058,7 @@ doapply(void)
     case CHEST:
     case ICE_BOX:
     case SACK:
+    case FABERGE_EGG:
     case BAG_OF_HOLDING:
     case OILSKIN_SACK:
         res = use_container(&obj, TRUE, FALSE);

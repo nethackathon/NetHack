@@ -318,6 +318,7 @@ mkbox_cnts(struct obj *box)
             break;
         }
         /*FALLTHRU*/
+    case FABERGE_EGG:
     case BAG_OF_HOLDING:
         n = 1;
         break;
@@ -359,7 +360,7 @@ mkbox_cnts(struct obj *box)
                         otmp->quan = 1L;
                     otmp->owt = weight(otmp);
                 }
-            if (box->otyp == BAG_OF_HOLDING) {
+            if (box->otyp == BAG_OF_HOLDING || box->otyp == FABERGE_EGG) {
                 if (Is_mbag(otmp)) {
                     otmp->otyp = SACK;
                     otmp->spe = 0;
@@ -995,6 +996,7 @@ mksobj_init(struct obj *otmp, boolean artif)
         case ICE_BOX:
         case SACK:
         case OILSKIN_SACK:
+        case FABERGE_EGG:
         case BAG_OF_HOLDING:
             mkbox_cnts(otmp);
             break;
@@ -1681,7 +1683,7 @@ bless(struct obj *otmp)
     otmp->blessed = 1;
     if (carried(otmp) && confers_luck(otmp))
         set_moreluck();
-    else if (otmp->otyp == BAG_OF_HOLDING)
+    else if (otmp->otyp == BAG_OF_HOLDING || otmp->otyp == FABERGE_EGG)
         otmp->owt = weight(otmp);
     else if (otmp->otyp == FIGURINE && otmp->timed)
         (void) stop_timer(FIG_TRANSFORM, obj_to_any(otmp));
@@ -1700,7 +1702,7 @@ unbless(struct obj *otmp)
     otmp->blessed = 0;
     if (carried(otmp) && confers_luck(otmp))
         set_moreluck();
-    else if (otmp->otyp == BAG_OF_HOLDING)
+    else if (otmp->otyp == BAG_OF_HOLDING || otmp->otyp == FABERGE_EGG)
         otmp->owt = weight(otmp);
     if (otmp->lamplit)
         maybe_adjust_light(otmp, old_light);
@@ -1729,7 +1731,7 @@ curse(struct obj *otmp)
     /* some cursed items need immediate updating */
     if (carried(otmp) && confers_luck(otmp)) {
         set_moreluck();
-    } else if (otmp->otyp == BAG_OF_HOLDING) {
+    } else if (otmp->otyp == BAG_OF_HOLDING || otmp->otyp == FABERGE_EGG) {
         otmp->owt = weight(otmp);
     } else if (otmp->otyp == FIGURINE) {
         if (otmp->corpsenm != NON_PM && !dead_species(otmp->corpsenm, TRUE)
@@ -1755,7 +1757,7 @@ uncurse(struct obj *otmp)
     otmp->cursed = 0;
     if (carried(otmp) && confers_luck(otmp))
         set_moreluck();
-    else if (otmp->otyp == BAG_OF_HOLDING)
+    else if (otmp->otyp == BAG_OF_HOLDING || otmp->otyp == FABERGE_EGG)
         otmp->owt = weight(otmp);
     else if (otmp->otyp == FIGURINE && otmp->timed)
         (void) stop_timer(FIG_TRANSFORM, obj_to_any(otmp));
@@ -1874,7 +1876,7 @@ weight(struct obj *obj)
          *  The macro DELTA_CWT in pickup.c also implements these
          *  weight equations.
          */
-        if (obj->otyp == BAG_OF_HOLDING)
+        if (obj->otyp == BAG_OF_HOLDING || obj->otyp == FABERGE_EGG)
             cwt = obj->cursed ? (cwt * 2)
                   : obj->blessed ? ((cwt + 3) / 4)
                     : ((cwt + 1) / 2); /* uncursed */

@@ -91,3 +91,5 @@ bundle/*
 *.user
 util/*.lib
 util/*.exp
+
+.idea

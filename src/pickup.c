@@ -1423,7 +1423,7 @@ delta_cwt(struct obj *container, struct obj *obj)
     struct obj **prev;
     int owt, nwt;
 
-    if (container->otyp != BAG_OF_HOLDING)
+    if (container->otyp != BAG_OF_HOLDING  && container->otyp != FABERGE_EGG)
         return obj->owt;
 
     owt = nwt = container->owt;
@@ -2494,7 +2494,7 @@ in_container(struct obj *obj)
         /* did not actually insert obj yet */
         if (was_unpaid)
             addtobill(obj, FALSE, FALSE, TRUE);
-        if (obj->otyp == BAG_OF_HOLDING) /* one bag of holding into another */
+        if (obj->otyp == BAG_OF_HOLDING || obj->otyp == FABERGE_EGG) /* one bag of holding into another */
             do_boh_explosion(obj, (boolean) (obj->where == OBJ_FLOOR));
         obfree(obj, (struct obj *) 0);
         /* if carried, shop goods will be flagged 'unpaid' and obfree() will
