@@ -2130,7 +2130,7 @@ stuff_prevents_passage(struct monst* mtmp)
             && typ != FORTUNE_COOKIE && typ != CANDY_BAR && typ != PANCAKE
             && typ != LEMBAS_WAFER && typ != LUMP_OF_ROYAL_JELLY
             && obj->oclass != AMULET_CLASS && obj->oclass != RING_CLASS
-            && obj->oclass != VENOM_CLASS && typ != SACK
+            && obj->oclass != VENOM_CLASS && typ != SACK && typ != BAG_OF_BAGS
             && typ != BAG_OF_HOLDING && typ != BAG_OF_TRICKS
             && !Is_candle(obj) && typ != OILSKIN_SACK && typ != LEASH
             && typ != STETHOSCOPE && typ != BLINDFOLD && typ != TOWEL

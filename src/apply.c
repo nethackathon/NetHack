@@ -4058,6 +4058,8 @@ doapply(void)
     case CHEST:
     case ICE_BOX:
     case SACK:
+    case BAG_OF_BAGS:
+    case DESIGNER_BAG:
     case FABERGE_EGG:
     case BAG_OF_HOLDING:
     case OILSKIN_SACK:

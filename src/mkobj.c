@@ -304,6 +304,9 @@ mkbox_cnts(struct obj *box)
     case ICE_BOX:
         n = 20;
         break;
+    case BAG_OF_BAGS:
+        n = 7;
+        break;
     case CHEST:
         n = box->olocked ? 7 : 5;
         break;
@@ -318,6 +321,7 @@ mkbox_cnts(struct obj *box)
             break;
         }
         /*FALLTHRU*/
+    case DESIGNER_BAG:
     case FABERGE_EGG:
     case BAG_OF_HOLDING:
         n = 1;
@@ -327,7 +331,11 @@ mkbox_cnts(struct obj *box)
         break;
     }
 
-    for (n = rn2(n + 1); n > 0; n--) {
+    int n_objects = rn2(n + 1);
+    if (box->otyp == BAG_OF_BAGS) {
+      n_objects = n_objects + 1;
+    }
+    for (n = n_objects; n > 0; n--) {
         if (box->otyp == ICE_BOX) {
             otmp = mksobj(CORPSE, TRUE, FALSE);
             /* Note: setting age to 0 is correct.  Age has a different
@@ -339,6 +347,23 @@ mkbox_cnts(struct obj *box)
                 (void) stop_timer(REVIVE_MON, obj_to_any(otmp));
                 (void) stop_timer(SHRINK_GLOB, obj_to_any(otmp));
             }
+        } else if (box->otyp == BAG_OF_BAGS) {
+            int bag_n = rn2(100);
+            int bag_type;
+            if (bag_n < 40) {
+                bag_type = SACK;
+            } else if (bag_n < 55) {
+                bag_type = DESIGNER_BAG;
+            } else if (bag_n < 70) {
+                bag_type = OILSKIN_SACK;
+            } else if (bag_n < 90) {
+                bag_type = BAG_OF_TRICKS;
+            } else if (bag_n < 95) {
+                bag_type = BAG_OF_HOLDING;
+            } else {
+                bag_type = FABERGE_EGG;
+            }
+            otmp = mksobj(bag_type, TRUE, FALSE);
         } else {
             register int tprob;
             const struct icp *iprobs = boxiprobs;
@@ -995,6 +1020,8 @@ mksobj_init(struct obj *otmp, boolean artif)
             /*FALLTHRU*/
         case ICE_BOX:
         case SACK:
+        case DESIGNER_BAG:
+        case BAG_OF_BAGS:
         case OILSKIN_SACK:
         case FABERGE_EGG:
         case BAG_OF_HOLDING:

@@ -1240,6 +1240,8 @@ harmless_missile(struct obj *obj)
     case BAG_OF_TRICKS:
         return (obj->spe < 1);
     case SACK:
+    case DESIGNER_BAG:
+    case BAG_OF_BAGS:
     case OILSKIN_SACK:
     case BAG_OF_HOLDING:
         return !Has_contents(obj);
