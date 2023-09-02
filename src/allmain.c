@@ -534,8 +534,8 @@ moveloop(boolean resuming)
 {
     moveloop_preamble(resuming);
 
-    if (!resuming)
-        maybe_do_tutorial();
+    //if (!resuming)
+    //    maybe_do_tutorial();
 
     for (;;) {
         moveloop_core();
