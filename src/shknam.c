@@ -187,6 +187,11 @@ static const char *const shkhealthfoods[] = {
     "=Zennia",  "=Zoe",      "=Zora",    0
 };
 
+static const char *const shkbagshop[] = {
+    /* Bag names */
+    "Holden",   "Carrie",   "Baggins",  0
+};
+
 /*
  * To add new shop types, all that is necessary is to edit the shtypes[]
  * array.  See mkroom.h for the structure definition.  Typically, you'll
@@ -205,7 +210,7 @@ static const char *const shkhealthfoods[] = {
 const struct shclass shtypes[] = {
     { "general store",
       RANDOM_CLASS,
-      42,
+      40,
       D_SHOP,
       { { 100, RANDOM_CLASS },
         { 0, 0 },
@@ -216,7 +221,7 @@ const struct shclass shtypes[] = {
       shkgeneral },
     { "used armor dealership",
       ARMOR_CLASS,
-      14,
+      12,
       D_SHOP,
       { { 90, ARMOR_CLASS },
         { 10, WEAPON_CLASS },
@@ -238,7 +243,7 @@ const struct shclass shtypes[] = {
       shkbooks },
     { "liquor emporium",
       POTION_CLASS,
-      10,
+      8,
       D_SHOP,
       { { 100, POTION_CLASS },
         { 0, 0 },
@@ -249,7 +254,7 @@ const struct shclass shtypes[] = {
       shkliquors },
     { "antique weapons outlet",
       WEAPON_CLASS,
-      5,
+      4,
       D_SHOP,
       { { 90, WEAPON_CLASS },
         { 10, ARMOR_CLASS },
@@ -260,7 +265,7 @@ const struct shclass shtypes[] = {
       shkweapons },
     { "delicatessen",
       FOOD_CLASS,
-      5,
+      4,
       D_SHOP,
       { { 83, FOOD_CLASS },
         { 5, -POT_FRUIT_JUICE },
@@ -322,6 +327,17 @@ const struct shclass shtypes[] = {
         { 2, -SCR_FOOD_DETECTION },
         { 1, -LUMP_OF_ROYAL_JELLY } },
       shkhealthfoods },
+    { "bag store",
+      TOOL_CLASS,
+      80,
+      D_SHOP,
+      { { 40, -SACK },
+        { 15, -DESIGNER_BAG },
+        { 15, -OILSKIN_SACK },
+        { 20, -BAG_OF_TRICKS },
+        { 5, -BAG_OF_HOLDING },
+        { 5, -FABERGE_EGG } },
+      shkbagshop },
     /* Shops below this point are "unique".  That is they must all have a
      * probability of zero.  They are only created via the special level
      * loader.

@@ -3552,6 +3552,9 @@ shop_string(int rtype)
     case CANDLESHOP:
         str = "lighting shop";
         break;
+    case BAGSHOP:
+        str = "bag shop";
+        break;
     default:
         break;
     }
