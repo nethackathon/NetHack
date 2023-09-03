@@ -325,7 +325,7 @@ struct obj {
 /* usually waterproof; random chance to be subjected to leakage if cursed;
    excludes statues, which aren't vulnerable to water even when cursed */
 #define Waterproof_container(o) \
-    ((o)->otyp == OILSKIN_SACK || (o)->otyp == ICE_BOX  || (o)->otyp == FABERGE_EGG || Is_box(o))
+    ((o)->otyp == OILSKIN_SACK || (o)->otyp == ICE_BOX || (o)->otyp == COOLER_BAG || (o)->otyp == FABERGE_EGG || Is_box(o))
 
 /* dragon gear */
 #define Is_dragon_scales(obj) \

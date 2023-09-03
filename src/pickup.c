@@ -59,7 +59,7 @@ static void tipcontainer(struct obj *);
 /* if you can figure this out, give yourself a hearty pat on the back... */
 #define GOLD_CAPACITY(w, n) (((w) * -100L) - ((n) + 50L) - 1L)
 
-#define Icebox (gc.current_container->otyp == ICE_BOX)
+#define Icebox (gc.current_container->otyp == ICE_BOX || gc.current_container->otyp == COOLER_BAG)
 
 static const char
         moderateloadmsg[] = "You have a little trouble lifting",
@@ -3555,7 +3555,7 @@ tipcontainer(struct obj *box) /* or bag */
             obj_extract_self(otmp);
             otmp->ox = box->ox, otmp->oy = box->oy;
 
-            if (box->otyp == ICE_BOX) {
+            if (box->otyp == ICE_BOX || box->otyp == COOLER_BAG) {
                 removed_from_icebox(otmp); /* resume rotting for corpse */
             } else if (cursed_mbag && is_boh_item_gone()) {
                 loss += mbag_item_gone(srcheld, otmp, FALSE);

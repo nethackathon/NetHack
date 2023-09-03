@@ -304,6 +304,9 @@ mkbox_cnts(struct obj *box)
     case ICE_BOX:
         n = 20;
         break;
+    case COOLER_BAG:
+        n = 7;
+        break;
     case BAG_OF_BAGS:
         n = 7;
         break;
@@ -347,6 +350,37 @@ mkbox_cnts(struct obj *box)
                 (void) stop_timer(REVIVE_MON, obj_to_any(otmp));
                 (void) stop_timer(SHRINK_GLOB, obj_to_any(otmp));
             }
+        } else if (box->otyp == COOLER_BAG) {
+            int item_n = rn2(100);
+            int item_type;
+            if (item_n < 10) {
+              item_type = POT_FRUIT_JUICE;
+            } else if (item_n < 20) {
+              item_type = POT_BOOZE;
+            } else if (item_n < 30) {
+              item_type = APPLE;
+            } else if (item_n < 40) {
+                item_type = ORANGE;
+            } else if (item_n < 50) {
+                item_type = BANANA;
+            } else if (item_n < 60) {
+                item_type = EGG;
+            } else if (item_n < 70) {
+                item_type = CREAM_PIE;
+            } else if (item_n < 80) {
+                item_type = CANDY_BAR;
+            } else if (item_n < 90) {
+                item_type = FOOD_RATION;
+            } else {
+                item_type = CARROT;
+            }
+            otmp = mksobj(item_type, TRUE, FALSE);
+            otmp->age = 0L;
+            if (otmp->timed) {
+                (void) stop_timer(ROT_CORPSE, obj_to_any(otmp));
+                (void) stop_timer(REVIVE_MON, obj_to_any(otmp));
+                (void) stop_timer(SHRINK_GLOB, obj_to_any(otmp));
+            }
         } else if (box->otyp == BAG_OF_BAGS) {
             int bag_n = rn2(100);
             int bag_type;
@@ -356,6 +390,8 @@ mkbox_cnts(struct obj *box)
                 bag_type = DESIGNER_BAG;
             } else if (bag_n < 70) {
                 bag_type = OILSKIN_SACK;
+            } else if (bag_n < 80) {
+                bag_type = COOLER_BAG;
             } else if (bag_n < 90) {
                 bag_type = BAG_OF_TRICKS;
             } else if (bag_n < 95) {
@@ -1019,6 +1055,7 @@ mksobj_init(struct obj *otmp, boolean artif)
             otmp->otrapped = !(rn2(10));
             /*FALLTHRU*/
         case ICE_BOX:
+        case COOLER_BAG:
         case SACK:
         case DESIGNER_BAG:
         case BAG_OF_BAGS:
